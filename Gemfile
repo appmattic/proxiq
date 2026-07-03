@@ -4,6 +4,7 @@ ruby ">= 3.1", "< 4.1"
 
 gem "jekyll", "~> 4.3"
 gem "just-the-docs", "~> 0.10"
+gem "jekyll-remote-theme"
 
 # GitHub Pages safe plugins
 gem "jekyll-seo-tag"

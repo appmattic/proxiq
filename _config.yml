@@ -3,7 +3,7 @@ description: "LLM context optimization proxy. Reduce token costs 65–85% via se
 baseurl: ""
 url: "https://proxiq.io"
 
-theme: just-the-docs
+remote_theme: just-the-docs/just-the-docs
 
 # Site logo
 logo: "/assets/images/appmattic-mark.svg"
@@ -61,6 +61,7 @@ nav_enabled: true
 
 # Plugins (GitHub Pages safe)
 plugins:
+  - jekyll-remote-theme
   - jekyll-seo-tag
   - jekyll-sitemap
 
