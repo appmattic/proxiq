@@ -1,0 +1,76 @@
+/* APPMATTIC-inspired visual system for the docs site */
+
+:root {
+  --appmattic-red: #ff3b2f;
+  --appmattic-red-strong: #ff2f22;
+  --appmattic-red-soft: rgba(255, 59, 47, 0.18);
+}
+
+/* Top header accent */
+.site-header {
+  border-bottom: 2px solid var(--appmattic-red);
+}
+
+/* Link color treatment */
+.main-content a,
+.side-bar a,
+.nav-list .nav-list-link {
+  color: var(--appmattic-red);
+}
+
+.main-content a:hover,
+.side-bar a:hover,
+.nav-list .nav-list-link:hover {
+  color: var(--appmattic-red-strong);
+}
+
+/* Active nav line uses brand red */
+.nav-list .nav-list-item .nav-list-expander,
+.nav-list .nav-list-item .nav-list-link.active {
+  color: var(--appmattic-red);
+}
+
+/* Buttons */
+.btn.btn-primary,
+.main-content .btn-primary,
+.main-content a.btn.btn-primary,
+.main-content a.btn.btn-primary:visited {
+  background-color: #ffffff;
+  background-image: none;
+  border-color: #ffffff;
+  color: var(--appmattic-red);
+}
+
+.btn.btn-primary:hover,
+.btn.btn-primary:focus,
+.main-content .btn-primary:hover,
+.main-content .btn-primary:focus,
+.main-content a.btn.btn-primary:hover,
+.main-content a.btn.btn-primary:focus {
+  background-color: #f4f4f4;
+  background-image: none;
+  border-color: #f4f4f4;
+  color: var(--appmattic-red-strong);
+}
+
+.btn.btn-primary:active,
+.main-content .btn-primary:active,
+.main-content a.btn.btn-primary:active {
+  background-color: #02060d;
+  background-image: none;
+  border-color: #02060d;
+  color: #ffffff;
+}
+
+/* Search input brand focus ring */
+.search-input:focus {
+  box-shadow: 0 0 0 3px var(--appmattic-red-soft);
+  border-color: var(--appmattic-red);
+}
+
+/* Callout tuning for dark background */
+.warning,
+.tip,
+.note {
+  border-left-width: 4px;
+}
