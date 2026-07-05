@@ -10,7 +10,7 @@ nav_order: 1
 Proxiq sits between your teams and every LLM API — giving security teams DLP, policy enforcement, SSO, and a full audit trail, while developers keep using Claude, GPT, or any other model with **zero code changes**.
 {: .fs-6 .fw-300 }
 
-[Get started in 5 minutes]({% link docs/getting-started.md %}){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
+[Get started in 5 minutes](docs/getting-started/){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [View on GitHub](https://github.com/appmattic/proxiq){: .btn .fs-5 .mb-4 .mb-md-0 }
 
 ---
@@ -121,15 +121,15 @@ const client = relay(new Anthropic());
 
 ## Browse the docs
 
-- [Getting Started]({% link docs/getting-started.md %}) — install, first request, first security policy
-- [Enterprise & Security]({% link docs/enterprise.md %}) — DLP, prompt guard, SSO, compliance
-- [Configuration]({% link docs/configuration.md %}) — full `.proxiq.json` reference
-- [Supported Providers]({% link docs/providers.md %}) — Anthropic, OpenAI, Azure, Groq, Ollama, and more
-- [SDK Integration]({% link docs/sdk.md %}) — drop-in wrapper for Anthropic/OpenAI clients
-- [CLI Reference]({% link docs/cli.md %}) — all commands
-- [Claude Connector]({% link docs/claude-connector.md %}) — MCP setup for Claude Code and Claude Desktop
-- [Deployment]({% link docs/deployment.md %}) — Docker, systemd, AWS, Azure
-- [Architecture]({% link docs/architecture.md %}) — security pipeline and storage design
+- [Getting Started](docs/getting-started/) — install, first request, first security policy
+- [Enterprise & Security](docs/enterprise/) — DLP, prompt guard, SSO, compliance
+- [Configuration](docs/configuration/) — full `.proxiq.json` reference
+- [Supported Providers](docs/providers/) — Anthropic, OpenAI, Azure, Groq, Ollama, and more
+- [SDK Integration](docs/sdk/) — drop-in wrapper for Anthropic/OpenAI clients
+- [CLI Reference](docs/cli/) — all commands
+- [Claude Connector](docs/claude-connector/) — MCP setup for Claude Code and Claude Desktop
+- [Deployment](docs/deployment/) — Docker, systemd, AWS, Azure
+- [Architecture](docs/architecture/) — security pipeline and storage design
 
 ---
 
@@ -139,5 +139,5 @@ Proxiq is open-source under AGPL-3.0. Self-hosting for internal use is always fr
 
 APPMATTIC offers commercial licensing, managed deployment, SLA support, and professional onboarding for regulated industries.
 
-[Enterprise details]({% link docs/enterprise.md %}){: .btn .btn-primary .mr-2 }
+[Enterprise details](docs/enterprise/){: .btn .btn-primary .mr-2 }
 [Email APPMATTIC](mailto:build@appmattic.com){: .btn }
