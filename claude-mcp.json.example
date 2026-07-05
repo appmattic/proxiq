@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "proxiq": {
+      "command": "/path/to/bun",
+      "args": ["/path/to/proxiq/packages/mcp/dist/index.js"],
+      "env": {
+        "PROXIQ_URL": "http://127.0.0.1:3099"
+      }
+    }
+  }
+}

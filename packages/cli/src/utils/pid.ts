@@ -1,0 +1,18 @@
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+
+const PID_FILE = "proxiq.pid";
+
+export function writePidFile(): void {
+  writeFileSync(PID_FILE, String(process.pid), "utf-8");
+}
+
+export function readPidFile(): number | null {
+  if (!existsSync(PID_FILE)) return null;
+  const raw = readFileSync(PID_FILE, "utf-8").trim();
+  const pid = Number.parseInt(raw, 10);
+  return Number.isNaN(pid) ? null : pid;
+}
+
+export function removePidFile(): void {
+  if (existsSync(PID_FILE)) unlinkSync(PID_FILE);
+}

@@ -1,0 +1,48 @@
+{
+  "port": 3099,
+  "host": "127.0.0.1",
+  "providers": {
+    "default": "anthropic",
+    "azureOpenai": {
+      "resourceName": "my-azure-resource",
+      "apiVersion": "2024-02-01"
+    },
+    "custom": {
+      "baseUrl": "https://my-private-llm.internal/v1",
+      "format": "openai-compatible"
+    }
+  },
+  "cache": {
+    "enabled": true,
+    "exact": { "enabled": true, "ttlSeconds": 86400 },
+    "semantic": { "enabled": false, "similarityThreshold": 0.94, "dryRun": false },
+    "storagePath": ".proxiq/cache.db"
+  },
+  "optimizer": {
+    "promptCache": { "enabled": true },
+    "compression": { "enabled": false, "triggerTokens": 6000, "retainTurns": 4 }
+  },
+  "memory": {
+    "enabled": false,
+    "sessionTtlSeconds": 7200,
+    "topK": 5
+  },
+  "routing": {
+    "mode": "off",
+    "tiers": {
+      "simple": "claude-haiku-4-5-20251001",
+      "standard": "claude-sonnet-4-6",
+      "complex": "claude-opus-4-8"
+    },
+    "classifierApiKey": "env:ANTHROPIC_API_KEY"
+  },
+  "logging": {
+    "level": "info",
+    "includePrompts": false,
+    "format": "pretty"
+  },
+  "cloud": {
+    "enabled": false,
+    "apiKey": "env:PROXIQ_CLOUD_API_KEY"
+  }
+}
