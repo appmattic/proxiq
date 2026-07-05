@@ -4,10 +4,10 @@ title: Home
 nav_order: 1
 ---
 
-# The AI gateway your security team will actually approve.
+# Proxiq - Every AI call. Audited. Controlled. Compliant.
 {: .fs-9 }
 
-Proxiq sits between your teams and every LLM API — giving security teams DLP, policy enforcement, SSO, and a full audit trail, while developers keep using Claude, GPT, or any other model with **zero code changes**.
+The self-hosted LLM gateway security teams demand and developers never notice.
 {: .fs-6 .fw-300 }
 
 [Get started in 5 minutes](docs/getting-started/){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
