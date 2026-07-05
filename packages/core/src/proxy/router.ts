@@ -47,7 +47,7 @@ export function buildForwardHeaders(
       const match = result.authorization.match(/^Bearer\s+(.+)$/i);
       if (match) {
         result["x-api-key"] = match[1]!;
-        result.authorization = undefined;
+        delete result.authorization;
       }
     }
   }
