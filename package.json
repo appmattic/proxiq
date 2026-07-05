@@ -1,0 +1,23 @@
+{
+  "name": "proxiq",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cut LLM API costs automatically. Proxiq routes prompts to the cheapest capable model by intent, caches identical requests, and works with Anthropic, OpenAI, Groq and more.",
+  "workspaces": [
+    "packages/core",
+    "packages/cli",
+    "packages/sdk",
+    "packages/mcp"
+  ],
+  "scripts": {
+    "build": "cd packages/cli && bun build src/index.ts --outfile ../../proxiq --target bun && chmod +x ../../proxiq",
+    "test": "bun test packages/core/tests/",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "typecheck": "tsc --noEmit -p tsconfig.base.json"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "typescript": "^5.7.3"
+  }
+}

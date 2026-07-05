@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: x64
+            runner: ubuntu-latest
+            target: bun-linux-x64
+          - os: linux
+            arch: arm64
+            runner: ubuntu-latest
+            target: bun-linux-arm64
+          - os: darwin
+            arch: x64
+            runner: macos-13
+            target: bun-darwin-x64
+          - os: darwin
+            arch: arm64
+            runner: macos-latest
+            target: bun-darwin-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install
+      - name: Build binary
+        run: |
+          OUTFILE="proxiq-${{ matrix.os }}-${{ matrix.arch }}"
+          # --compile produces a truly standalone executable that embeds the Bun
+          # runtime — no Bun installation required on the end user's machine.
+          bun build packages/cli/src/index.ts \
+            --outfile "$OUTFILE" \
+            --target ${{ matrix.target }} \
+            --compile \
+            --minify
+          chmod +x "$OUTFILE"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxiq-${{ matrix.os }}-${{ matrix.arch }}
+          path: proxiq-${{ matrix.os }}-${{ matrix.arch }}
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: proxiq-*
+          generate_release_notes: true
