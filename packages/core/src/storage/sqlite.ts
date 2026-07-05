@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
+import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { randomUUID } from "node:crypto";
 
 export type DB = Database;
 
@@ -11,35 +11,44 @@ export type DB = Database;
 // ---------------------------------------------------------------------------
 const PRICING: Array<{ pattern: RegExp; input: number; output: number }> = [
   // Anthropic
-  { pattern: /claude-opus-4/i,        input: 15,    output: 75    },
-  { pattern: /claude-sonnet-4/i,      input: 3,     output: 15    },
-  { pattern: /claude-haiku-4/i,       input: 0.80,  output: 4     },
-  { pattern: /claude-fable-5/i,       input: 20,    output: 100   },
-  { pattern: /claude-sonnet-5/i,      input: 3,     output: 15    },
-  { pattern: /claude-opus-3-5/i,      input: 15,    output: 75    },
-  { pattern: /claude-sonnet-3-5/i,    input: 3,     output: 15    },
-  { pattern: /claude-haiku-3-5/i,     input: 0.80,  output: 4     },
+  { pattern: /claude-opus-4/i, input: 15, output: 75 },
+  { pattern: /claude-sonnet-4/i, input: 3, output: 15 },
+  { pattern: /claude-haiku-4/i, input: 0.8, output: 4 },
+  { pattern: /claude-fable-5/i, input: 20, output: 100 },
+  { pattern: /claude-sonnet-5/i, input: 3, output: 15 },
+  { pattern: /claude-opus-3-5/i, input: 15, output: 75 },
+  { pattern: /claude-sonnet-3-5/i, input: 3, output: 15 },
+  { pattern: /claude-haiku-3-5/i, input: 0.8, output: 4 },
   // OpenAI
-  { pattern: /gpt-4o-mini/i,          input: 0.15,  output: 0.60  },
-  { pattern: /gpt-4o|gpt-4\.1/i,     input: 2.50,  output: 10    },
-  { pattern: /gpt-4-turbo/i,          input: 10,    output: 30    },
-  { pattern: /gpt-3\.5/i,             input: 0.50,  output: 1.50  },
+  { pattern: /gpt-4o-mini/i, input: 0.15, output: 0.6 },
+  { pattern: /gpt-4o|gpt-4\.1/i, input: 2.5, output: 10 },
+  { pattern: /gpt-4-turbo/i, input: 10, output: 30 },
+  { pattern: /gpt-3\.5/i, input: 0.5, output: 1.5 },
   // Google
-  { pattern: /gemini.*flash/i,        input: 0.075, output: 0.30  },
-  { pattern: /gemini.*pro/i,          input: 1.25,  output: 5     },
+  { pattern: /gemini.*flash/i, input: 0.075, output: 0.3 },
+  { pattern: /gemini.*pro/i, input: 1.25, output: 5 },
   // Meta / Llama (typical hosted rates)
   { pattern: /llama.*70b|llama.*3\.3/i, input: 0.59, output: 0.79 },
-  { pattern: /llama.*8b/i,            input: 0.05,  output: 0.08  },
+  { pattern: /llama.*8b/i, input: 0.05, output: 0.08 },
   // Mistral
-  { pattern: /mistral-large/i,        input: 2,     output: 6     },
-  { pattern: /mistral-small/i,        input: 0.10,  output: 0.30  },
+  { pattern: /mistral-large/i, input: 2, output: 6 },
+  { pattern: /mistral-small/i, input: 0.1, output: 0.3 },
   // Fallback — treat as mid-tier
-  { pattern: /.*/,                    input: 3,     output: 15    },
+  { pattern: /.*/, input: 3, output: 15 },
 ];
 
-export function estimateCost(model: string, inputTokens: number, outputTokens: number): number {
-  const p = PRICING.find((r) => r.pattern.test(model)) ?? { input: 3, output: 15 };
-  return (inputTokens / 1_000_000) * p.input + (outputTokens / 1_000_000) * p.output;
+export function estimateCost(
+  model: string,
+  inputTokens: number,
+  outputTokens: number
+): number {
+  const p = PRICING.find((r) => r.pattern.test(model)) ?? {
+    input: 3,
+    output: 15,
+  };
+  return (
+    (inputTokens / 1_000_000) * p.input + (outputTokens / 1_000_000) * p.output
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -148,23 +157,51 @@ export function initDatabase(storagePath: string): DB {
 
   // Migrate existing DBs — add new columns if they don't exist yet
   const existingCols = new Set(
-    (db.query("PRAGMA table_info(request_log)").all() as Array<{ name: string }>).map((r) => r.name)
+    (
+      db.query("PRAGMA table_info(request_log)").all() as Array<{
+        name: string;
+      }>
+    ).map((r) => r.name)
   );
   const migrations: string[] = [];
-  if (!existingCols.has("original_model"))  migrations.push("ALTER TABLE request_log ADD COLUMN original_model TEXT NOT NULL DEFAULT ''");
-  if (!existingCols.has("routed_model"))    migrations.push("ALTER TABLE request_log ADD COLUMN routed_model TEXT NOT NULL DEFAULT ''");
-  if (!existingCols.has("routing_method"))  migrations.push("ALTER TABLE request_log ADD COLUMN routing_method TEXT NOT NULL DEFAULT 'default'");
-  if (!existingCols.has("routing_tier"))    migrations.push("ALTER TABLE request_log ADD COLUMN routing_tier TEXT NOT NULL DEFAULT 'standard'");
-  if (!existingCols.has("cost_usd"))        migrations.push("ALTER TABLE request_log ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0");
-  if (!existingCols.has("saved_usd"))       migrations.push("ALTER TABLE request_log ADD COLUMN saved_usd REAL NOT NULL DEFAULT 0");
-  if (!existingCols.has("user_label"))      migrations.push("ALTER TABLE request_log ADD COLUMN user_label TEXT NOT NULL DEFAULT 'anonymous'");
+  if (!existingCols.has("original_model"))
+    migrations.push(
+      "ALTER TABLE request_log ADD COLUMN original_model TEXT NOT NULL DEFAULT ''"
+    );
+  if (!existingCols.has("routed_model"))
+    migrations.push(
+      "ALTER TABLE request_log ADD COLUMN routed_model TEXT NOT NULL DEFAULT ''"
+    );
+  if (!existingCols.has("routing_method"))
+    migrations.push(
+      "ALTER TABLE request_log ADD COLUMN routing_method TEXT NOT NULL DEFAULT 'default'"
+    );
+  if (!existingCols.has("routing_tier"))
+    migrations.push(
+      "ALTER TABLE request_log ADD COLUMN routing_tier TEXT NOT NULL DEFAULT 'standard'"
+    );
+  if (!existingCols.has("cost_usd"))
+    migrations.push(
+      "ALTER TABLE request_log ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0"
+    );
+  if (!existingCols.has("saved_usd"))
+    migrations.push(
+      "ALTER TABLE request_log ADD COLUMN saved_usd REAL NOT NULL DEFAULT 0"
+    );
+  if (!existingCols.has("user_label"))
+    migrations.push(
+      "ALTER TABLE request_log ADD COLUMN user_label TEXT NOT NULL DEFAULT 'anonymous'"
+    );
   for (const sql of migrations) db.exec(sql);
 
   // Migrate tokens table
   const tokenCols = new Set(
-    (db.query("PRAGMA table_info(tokens)").all() as Array<{ name: string }>).map((r) => r.name)
+    (
+      db.query("PRAGMA table_info(tokens)").all() as Array<{ name: string }>
+    ).map((r) => r.name)
   );
-  if (!tokenCols.has("policy_name")) db.exec("ALTER TABLE tokens ADD COLUMN policy_name TEXT");
+  if (!tokenCols.has("policy_name"))
+    db.exec("ALTER TABLE tokens ADD COLUMN policy_name TEXT");
 
   // Indexes for new columns — safe to run after migration
   db.exec(`
@@ -191,7 +228,8 @@ export interface CacheStats {
 }
 
 export function getCacheStats(db: DB): CacheStats {
-  const row = db.query(`
+  const row = db
+    .query(`
     SELECT
       COUNT(*) as total,
       SUM(from_cache) as hits,
@@ -199,7 +237,8 @@ export function getCacheStats(db: DB): CacheStats {
       SUM(output_tokens) as output_tokens,
       AVG(duration_ms) as avg_duration
     FROM request_log
-  `).get() as {
+  `)
+    .get() as {
     total: number;
     hits: number;
     input_tokens: number;
@@ -235,14 +274,20 @@ export interface RoutingSwitch {
 
 export interface PeriodStats {
   period: StatsPeriod;
-  fromTs: number;  // Unix seconds
+  fromTs: number; // Unix seconds
   toTs: number;
   requests: {
     total: number;
     cached: number;
     streamed: number;
     byTier: { simple: number; standard: number; complex: number };
-    byMethod: { classifier: number; rule: number; header: number; default: number; cache: number };
+    byMethod: {
+      classifier: number;
+      rule: number;
+      header: number;
+      default: number;
+      cache: number;
+    };
   };
   models: {
     switches: RoutingSwitch[];
@@ -266,21 +311,30 @@ function periodBounds(period: StatsPeriod): [number, number] {
   const todayMidnight = now - (now % 86400); // approximate UTC midnight
 
   switch (period) {
-    case "today":   return [todayMidnight, now];
-    case "weekly":  return [now - 7 * 86400, now];
-    case "monthly": return [now - 30 * 86400, now];
-    case "daily_avg": return [now - 30 * 86400, now]; // same window, results divided
+    case "today":
+      return [todayMidnight, now];
+    case "weekly":
+      return [now - 7 * 86400, now];
+    case "monthly":
+      return [now - 30 * 86400, now];
+    case "daily_avg":
+      return [now - 30 * 86400, now]; // same window, results divided
   }
 }
 
-export function getStats(db: DB, period: StatsPeriod, user?: string): PeriodStats {
+export function getStats(
+  db: DB,
+  period: StatsPeriod,
+  user?: string
+): PeriodStats {
   const [fromTs, toTs] = periodBounds(period);
   const divisor = period === "daily_avg" ? 30 : 1;
 
   const userClause = user ? "AND user_label = ?" : "";
   const baseParams = user ? [fromTs, toTs, user] : [fromTs, toTs];
 
-  const agg = db.query(`
+  const agg = db
+    .query(`
     SELECT
       COUNT(*)                                            AS total,
       SUM(from_cache)                                    AS cached,
@@ -299,24 +353,28 @@ export function getStats(db: DB, period: StatsPeriod, user?: string): PeriodStat
       SUM(saved_usd)     AS total_saved
     FROM request_log
     WHERE created_at >= ? AND created_at <= ? ${userClause}
-  `).get(...baseParams) as Record<string, number> | null;
+  `)
+    .get(...baseParams) as Record<string, number> | null;
 
   const r = agg ?? {};
-  const div = (n: number) => Math.round((n ?? 0) / divisor * 100) / 100;
+  const div = (n: number) => Math.round(((n ?? 0) / divisor) * 100) / 100;
 
   // Model usage breakdown
-  const modelRows = db.query(`
+  const modelRows = db
+    .query(`
     SELECT routed_model AS model, COUNT(*) AS cnt
     FROM request_log
     WHERE created_at >= ? AND created_at <= ? ${userClause} AND routed_model != ''
     GROUP BY routed_model
-  `).all(...baseParams) as Array<{ model: string; cnt: number }>;
+  `)
+    .all(...baseParams) as Array<{ model: string; cnt: number }>;
 
   const used: Record<string, number> = {};
   for (const row of modelRows) used[row.model] = Math.round(row.cnt / divisor);
 
   // Routing switches (where original != routed)
-  const switchRows = db.query(`
+  const switchRows = db
+    .query(`
     SELECT original_model AS src, routed_model AS dst, COUNT(*) AS cnt
     FROM request_log
     WHERE created_at >= ? AND created_at <= ? ${userClause}
@@ -326,7 +384,8 @@ export function getStats(db: DB, period: StatsPeriod, user?: string): PeriodStat
     GROUP BY original_model, routed_model
     ORDER BY cnt DESC
     LIMIT 20
-  `).all(...baseParams) as Array<{ src: string; dst: string; cnt: number }>;
+  `)
+    .all(...baseParams) as Array<{ src: string; dst: string; cnt: number }>;
 
   const switches: RoutingSwitch[] = switchRows.map((row) => ({
     from: row.src,
@@ -337,9 +396,8 @@ export function getStats(db: DB, period: StatsPeriod, user?: string): PeriodStat
   const actualUsd = div(r.total_cost ?? 0);
   const savedUsd = div(r.total_saved ?? 0);
   const wouldHaveCost = Math.round((actualUsd + savedUsd) * 100) / 100;
-  const savingsPct = wouldHaveCost > 0
-    ? Math.round((savedUsd / wouldHaveCost) * 1000) / 10
-    : 0;
+  const savingsPct =
+    wouldHaveCost > 0 ? Math.round((savedUsd / wouldHaveCost) * 1000) / 10 : 0;
 
   return {
     period,
@@ -350,21 +408,21 @@ export function getStats(db: DB, period: StatsPeriod, user?: string): PeriodStat
       cached: div(r.cached ?? 0),
       streamed: div(r.streamed ?? 0),
       byTier: {
-        simple:   div(r.tier_simple ?? 0),
+        simple: div(r.tier_simple ?? 0),
         standard: div(r.tier_standard ?? 0),
-        complex:  div(r.tier_complex ?? 0),
+        complex: div(r.tier_complex ?? 0),
       },
       byMethod: {
         classifier: div(r.m_classifier ?? 0),
-        rule:       div(r.m_rule ?? 0),
-        header:     div(r.m_header ?? 0),
-        default:    div(r.m_default ?? 0),
-        cache:      div(r.m_cache ?? 0),
+        rule: div(r.m_rule ?? 0),
+        header: div(r.m_header ?? 0),
+        default: div(r.m_default ?? 0),
+        cache: div(r.m_cache ?? 0),
       },
     },
     models: { switches, used },
     tokens: {
-      totalInput:  div(r.total_input ?? 0),
+      totalInput: div(r.total_input ?? 0),
       totalOutput: div(r.total_output ?? 0),
     },
     cost: {
@@ -412,11 +470,17 @@ export interface PolicyEvent {
 }
 
 export function getRecentPolicyEvents(db: DB, limit = 100): PolicyEvent[] {
-  const rows = db.query(
-    "SELECT id, created_at, user_label, policy_name, action, detail FROM policy_log ORDER BY created_at DESC LIMIT ?"
-  ).all(limit) as Array<{
-    id: string; created_at: number; user_label: string;
-    policy_name: string; action: string; detail: string | null;
+  const rows = db
+    .query(
+      "SELECT id, created_at, user_label, policy_name, action, detail FROM policy_log ORDER BY created_at DESC LIMIT ?"
+    )
+    .all(limit) as Array<{
+    id: string;
+    created_at: number;
+    user_label: string;
+    policy_name: string;
+    action: string;
+    detail: string | null;
   }>;
   return rows.map((r) => ({
     id: r.id,
@@ -424,7 +488,7 @@ export function getRecentPolicyEvents(db: DB, limit = 100): PolicyEvent[] {
     userLabel: r.user_label,
     policyName: r.policy_name,
     action: r.action,
-    detail: r.detail ? JSON.parse(r.detail) as Record<string, unknown> : null,
+    detail: r.detail ? (JSON.parse(r.detail) as Record<string, unknown>) : null,
   }));
 }
 
@@ -441,8 +505,14 @@ export interface StoredPolicy {
 }
 
 export function listStoredPolicies(db: DB): StoredPolicy[] {
-  const rows = db.query("SELECT * FROM policies ORDER BY name ASC").all() as Array<{
-    name: string; display_name: string | null; config: string; created_at: number; updated_at: number;
+  const rows = db
+    .query("SELECT * FROM policies ORDER BY name ASC")
+    .all() as Array<{
+    name: string;
+    display_name: string | null;
+    config: string;
+    created_at: number;
+    updated_at: number;
   }>;
   return rows.map((r) => ({
     name: r.name,
@@ -455,7 +525,11 @@ export function listStoredPolicies(db: DB): StoredPolicy[] {
 
 export function getStoredPolicy(db: DB, name: string): StoredPolicy | null {
   const r = db.query("SELECT * FROM policies WHERE name = ?").get(name) as {
-    name: string; display_name: string | null; config: string; created_at: number; updated_at: number;
+    name: string;
+    display_name: string | null;
+    config: string;
+    created_at: number;
+    updated_at: number;
   } | null;
   if (!r) return null;
   return {
@@ -471,7 +545,7 @@ export function upsertStoredPolicy(
   db: DB,
   name: string,
   displayName: string | null,
-  config: Record<string, unknown>,
+  config: Record<string, unknown>
 ): StoredPolicy {
   const now = Math.floor(Date.now() / 1000);
   const existing = getStoredPolicy(db, name);
@@ -481,7 +555,7 @@ export function upsertStoredPolicy(
       displayName,
       JSON.stringify(config),
       now,
-      name,
+      name
     );
   } else {
     db.run(
@@ -490,7 +564,7 @@ export function upsertStoredPolicy(
       displayName,
       JSON.stringify(config),
       now,
-      now,
+      now
     );
   }
   return getStoredPolicy(db, name)!;

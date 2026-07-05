@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { RelayMiddleware, RelayRequest, RelayResponse } from "../types.js";
 import type { DB } from "../../storage/sqlite.js";
+import type { RelayMiddleware, RelayRequest, RelayResponse } from "../types.js";
 
 export function createMetricsMiddleware(db: DB): RelayMiddleware {
   const insert = db.prepare(`
@@ -16,7 +16,10 @@ export function createMetricsMiddleware(db: DB): RelayMiddleware {
     name: "proxiq:metrics",
     priority: 10,
 
-    async onResponse(res: RelayResponse, req: RelayRequest): Promise<RelayResponse> {
+    async onResponse(
+      res: RelayResponse,
+      req: RelayRequest
+    ): Promise<RelayResponse> {
       try {
         insert.run(
           randomUUID(),

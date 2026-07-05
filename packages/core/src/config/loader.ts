@@ -1,8 +1,8 @@
 import { cosmiconfig } from "cosmiconfig";
 import { TypeScriptLoader } from "cosmiconfig-typescript-loader";
+import { resolveConfigSecrets } from "../secrets/index.js";
 import { ConfigSchema } from "./schema.js";
 import type { Config } from "./schema.js";
-import { resolveConfigSecrets } from "../secrets/index.js";
 
 const MODULE_NAME = "proxiq";
 
@@ -53,28 +53,30 @@ export function validateConfig(raw: unknown): Config {
   return parsed.data;
 }
 
-function applyEnvOverrides(raw: Record<string, unknown>): Record<string, unknown> {
+function applyEnvOverrides(
+  raw: Record<string, unknown>
+): Record<string, unknown> {
   const overrides: Record<string, unknown> = { ...raw };
 
-  if (process.env["PROXIQ_PORT"]) overrides["port"] = Number(process.env["PROXIQ_PORT"]);
-  if (process.env["PROXIQ_HOST"]) overrides["host"] = process.env["PROXIQ_HOST"];
+  if (process.env.PROXIQ_PORT) overrides.port = Number(process.env.PROXIQ_PORT);
+  if (process.env.PROXIQ_HOST) overrides.host = process.env.PROXIQ_HOST;
 
-  if (process.env["PROXIQ_LOG_LEVEL"]) {
-    overrides["logging"] = {
-      ...(overrides["logging"] as Record<string, unknown> | undefined),
-      level: process.env["PROXIQ_LOG_LEVEL"],
+  if (process.env.PROXIQ_LOG_LEVEL) {
+    overrides.logging = {
+      ...(overrides.logging as Record<string, unknown> | undefined),
+      level: process.env.PROXIQ_LOG_LEVEL,
     };
   }
 
-  if (process.env["PROXIQ_STORAGE_PATH"]) {
-    overrides["cache"] = {
-      ...(overrides["cache"] as Record<string, unknown> | undefined),
-      storagePath: process.env["PROXIQ_STORAGE_PATH"],
+  if (process.env.PROXIQ_STORAGE_PATH) {
+    overrides.cache = {
+      ...(overrides.cache as Record<string, unknown> | undefined),
+      storagePath: process.env.PROXIQ_STORAGE_PATH,
     };
   }
 
-  if (process.env["PROXIQ_DOCKER"] === "true" && !process.env["PROXIQ_HOST"]) {
-    overrides["host"] = "0.0.0.0";
+  if (process.env.PROXIQ_DOCKER === "true" && !process.env.PROXIQ_HOST) {
+    overrides.host = "0.0.0.0";
   }
 
   return overrides;

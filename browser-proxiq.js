@@ -9,24 +9,28 @@
  *   window.__proxiqUrl = 'http://127.0.0.1:3099'; // proxy URL
  *   window.__proxiqTier = 'simple';          // optional tier override
  */
-(function () {
+(() => {
   const INTERCEPTED_ORIGINS = [
     "https://api.anthropic.com",
     "https://api.openai.com",
     "https://api.groq.com",
   ];
 
-  const PROXIQ_URL =
-    window.__proxiqUrl || "http://127.0.0.1:3099";
+  const PROXIQ_URL = window.__proxiqUrl || "http://127.0.0.1:3099";
 
   const originalFetch = window.fetch.bind(window);
 
-  window.fetch = async function (input, init) {
+  window.fetch = async (input, init) => {
     if (window.__proxiqEnabled === false) {
       return originalFetch(input, init);
     }
 
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
     const shouldIntercept = INTERCEPTED_ORIGINS.some((o) => url.startsWith(o));
 
     if (!shouldIntercept) {
@@ -55,7 +59,8 @@
 
     const tier = response.headers.get("x-proxiq-routed-tier");
     const fromCache = response.headers.get("x-proxiq-from-cache");
-    if (tier) console.log(`[Proxiq] routed tier=${tier} cache=${fromCache || "false"}`);
+    if (tier)
+      console.log(`[Proxiq] routed tier=${tier} cache=${fromCache || "false"}`);
 
     return response;
   };

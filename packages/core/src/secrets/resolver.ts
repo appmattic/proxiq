@@ -18,13 +18,13 @@ import type { Config } from "../config/schema.js";
  */
 
 const RAW_KEY_PATTERNS: RegExp[] = [
-  /^sk-ant-/,              // Anthropic
+  /^sk-ant-/, // Anthropic
   /^sk-[A-Za-z0-9]{20,}/, // OpenAI / OpenAI-compat
-  /^gsk_/,                 // Groq
-  /^AIzaSy/,               // Google
-  /^xai-/,                 // xAI
-  /^r8_/,                  // Replicate
-  /^ft::/,                 // OpenAI fine-tune
+  /^gsk_/, // Groq
+  /^AIzaSy/, // Google
+  /^xai-/, // xAI
+  /^r8_/, // Replicate
+  /^ft::/, // OpenAI fine-tune
 ];
 
 function looksLikeRawKey(value: string): boolean {
@@ -49,7 +49,7 @@ export async function resolveSecret(
     if (!resolved) {
       throw new Error(
         `[secrets] ${fieldPath}: environment variable "${varName}" is not set.\n` +
-        `  Set it before starting Proxiq: export ${varName}=your-key`
+          `  Set it before starting Proxiq: export ${varName}=your-key`
       );
     }
     return resolved;
@@ -63,7 +63,9 @@ export async function resolveSecret(
         `[secrets] ${fieldPath}: file: prefix requires a path (e.g. file:/run/secrets/api-key)`
       );
     }
-    const resolvedPath = isAbsolute(rawPath) ? rawPath : join(process.cwd(), rawPath);
+    const resolvedPath = isAbsolute(rawPath)
+      ? rawPath
+      : join(process.cwd(), rawPath);
     try {
       return readFileSync(resolvedPath, "utf-8").trim();
     } catch (err) {
@@ -74,12 +76,17 @@ export async function resolveSecret(
   }
 
   // Phase 2 stubs
-  const phase2Prefixes = ["azure-keyvault:", "aws-secrets:", "vault:", "doppler:", "op:"];
+  const phase2Prefixes = [
+    "azure-keyvault:",
+    "aws-secrets:",
+    "vault:",
+    "doppler:",
+    "op:",
+  ];
   for (const prefix of phase2Prefixes) {
     if (value.startsWith(prefix)) {
       throw new Error(
-        `[secrets] ${fieldPath}: "${prefix}" secret provider is planned for Phase 2 and not yet available.\n` +
-        `  Use env: or file: for now. See https://proxiq.io/docs/secrets`
+        `[secrets] ${fieldPath}: "${prefix}" secret provider is planned for Phase 2 and not yet available.\n  Use env: or file: for now. See https://proxiq.io/docs/secrets`
       );
     }
   }
@@ -87,10 +94,7 @@ export async function resolveSecret(
   // Warn on raw keys
   if (looksLikeRawKey(value)) {
     console.warn(
-      `\n⚠️  Proxiq security warning: ${fieldPath} contains what looks like a raw API key.\n` +
-      `   Storing secrets in config files is risky. Consider:\n` +
-      `     env: reference  →  "${fieldPath}": "env:ANTHROPIC_API_KEY"\n` +
-      `     file: reference →  "${fieldPath}": "file:/run/secrets/api-key"\n`
+      `\n⚠️  Proxiq security warning: ${fieldPath} contains what looks like a raw API key.\n   Storing secrets in config files is risky. Consider:\n     env: reference  →  "${fieldPath}": "env:ANTHROPIC_API_KEY"\n     file: reference →  "${fieldPath}": "file:/run/secrets/api-key"\n`
     );
   }
 

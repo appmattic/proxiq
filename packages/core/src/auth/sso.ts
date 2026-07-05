@@ -14,18 +14,25 @@
  * with a signed session cookie containing their proxiq user label.
  */
 
-import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { upsertToken, getTokenByLabel } from "../storage/tokens.js";
-import { randomUUID, randomBytes, createHmac } from "node:crypto";
-import type { DB } from "../storage/sqlite.js";
+import { createHmac, randomBytes, randomUUID } from "node:crypto";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Config } from "../config/schema.js";
 import { resolveSecret } from "../secrets/index.js";
+import type { DB } from "../storage/sqlite.js";
+import { getTokenByLabel, upsertToken } from "../storage/tokens.js";
 
 /** Resolve an optional config string that may be "env:VAR_NAME". Returns undefined if falsy. */
-async function rs(value: string | undefined, field: string): Promise<string | undefined> {
+async function rs(
+  value: string | undefined,
+  field: string
+): Promise<string | undefined> {
   if (!value) return undefined;
-  try { return await resolveSecret(value, field) ?? undefined; }
-  catch { console.warn(`[proxiq:sso] Could not resolve secret for ${field}`); return undefined; }
+  try {
+    return (await resolveSecret(value, field)) ?? undefined;
+  } catch {
+    console.warn(`[proxiq:sso] Could not resolve secret for ${field}`);
+    return undefined;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -44,12 +51,20 @@ export function verifySession(
 ): { label: string; email: string; role: "admin" | "user" } | null {
   try {
     const [data, sig] = cookie.split(".");
-    const expected = createHmac("sha256", secret).update(data!).digest("base64url");
+    const expected = createHmac("sha256", secret)
+      .update(data!)
+      .digest("base64url");
     if (sig !== expected) return null;
     const parsed = JSON.parse(Buffer.from(data!, "base64url").toString()) as {
-      label: string; email: string; role?: "admin" | "user";
+      label: string;
+      email: string;
+      role?: "admin" | "user";
     };
-    return { label: parsed.label, email: parsed.email, role: parsed.role ?? "user" };
+    return {
+      label: parsed.label,
+      email: parsed.email,
+      role: parsed.role ?? "user",
+    };
   } catch {
     return null;
   }
@@ -63,7 +78,8 @@ function setSessionCookie(
   secret: string
 ): void {
   const token = signPayload({ label, email, role, iat: Date.now() }, secret);
-  reply.header("set-cookie",
+  reply.header(
+    "set-cookie",
     `proxiq_session=${token}; Path=/proxiq; HttpOnly; SameSite=Lax; Max-Age=86400`
   );
 }
@@ -75,7 +91,10 @@ function getSsoRole(email: string, adminEmails: string[]): "admin" | "user" {
 }
 
 function clearSessionCookie(reply: FastifyReply): void {
-  reply.header("set-cookie", "proxiq_session=; Path=/proxiq; HttpOnly; Max-Age=0");
+  reply.header(
+    "set-cookie",
+    "proxiq_session=; Path=/proxiq; HttpOnly; Max-Age=0"
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -104,13 +123,22 @@ function consumeState(state: string): boolean {
 // Token auto-provisioning
 // ---------------------------------------------------------------------------
 
-function provisionSsoToken(db: DB, email: string, defaultRpmLimit: number): string {
+function provisionSsoToken(
+  db: DB,
+  email: string,
+  defaultRpmLimit: number
+): string {
   const label = email.toLowerCase().replace(/[^a-z0-9._-]/g, "_");
   const existing = getTokenByLabel(db, label);
   if (existing && !existing.revoked) return existing.token;
 
   const token = `proxiq_${randomBytes(16).toString("hex")}`;
-  upsertToken(db, { label, token, rpmLimit: defaultRpmLimit, createdBy: "sso" });
+  upsertToken(db, {
+    label,
+    token,
+    rpmLimit: defaultRpmLimit,
+    createdBy: "sso",
+  });
   return token;
 }
 
@@ -124,14 +152,22 @@ async function exchangeCode(
 ): Promise<Record<string, unknown>> {
   const res = await fetch(tokenUrl, {
     method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded", "accept": "application/json" },
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      accept: "application/json",
+    },
     body: new URLSearchParams(params).toString(),
   });
   return res.json() as Promise<Record<string, unknown>>;
 }
 
-async function getJson(url: string, accessToken: string): Promise<Record<string, unknown>> {
-  const res = await fetch(url, { headers: { authorization: `Bearer ${accessToken}` } });
+async function getJson(
+  url: string,
+  accessToken: string
+): Promise<Record<string, unknown>> {
+  const res = await fetch(url, {
+    headers: { authorization: `Bearer ${accessToken}` },
+  });
   return res.json() as Promise<Record<string, unknown>>;
 }
 
@@ -148,21 +184,37 @@ export async function registerSsoRoutes(
   const sso = config.dashboard.sso;
   if (!sso.enabled) return;
 
-  const base = (sso.baseUrl ?? `http://localhost:${config.port}`).replace(/\/$/, "");
+  const base = (sso.baseUrl ?? `http://localhost:${config.port}`).replace(
+    /\/$/,
+    ""
+  );
   const rpmLimit = sso.defaultRpmLimit;
   const adminEmails = config.dashboard.adminEmails ?? [];
 
   // Resolve all env:VAR_NAME secrets upfront
-  const googleClientId     = await rs(sso.google.clientId,     "sso.google.clientId");
-  const googleClientSecret = await rs(sso.google.clientSecret, "sso.google.clientSecret");
-  const msClientId         = await rs(sso.microsoft.clientId,     "sso.microsoft.clientId");
-  const msClientSecret     = await rs(sso.microsoft.clientSecret, "sso.microsoft.clientSecret");
-  const msTenantId         = await rs(sso.microsoft.tenantId,     "sso.microsoft.tenantId") ?? "common";
-  const ghClientId         = await rs(sso.github.clientId,     "sso.github.clientId");
-  const ghClientSecret     = await rs(sso.github.clientSecret, "sso.github.clientSecret");
-  const oidcClientId       = await rs(sso.oidc.clientId,       "sso.oidc.clientId");
-  const oidcClientSecret   = await rs(sso.oidc.clientSecret,   "sso.oidc.clientSecret");
-  const samlCert           = await rs(sso.saml.cert,           "sso.saml.cert");
+  const googleClientId = await rs(sso.google.clientId, "sso.google.clientId");
+  const googleClientSecret = await rs(
+    sso.google.clientSecret,
+    "sso.google.clientSecret"
+  );
+  const msClientId = await rs(sso.microsoft.clientId, "sso.microsoft.clientId");
+  const msClientSecret = await rs(
+    sso.microsoft.clientSecret,
+    "sso.microsoft.clientSecret"
+  );
+  const msTenantId =
+    (await rs(sso.microsoft.tenantId, "sso.microsoft.tenantId")) ?? "common";
+  const ghClientId = await rs(sso.github.clientId, "sso.github.clientId");
+  const ghClientSecret = await rs(
+    sso.github.clientSecret,
+    "sso.github.clientSecret"
+  );
+  const oidcClientId = await rs(sso.oidc.clientId, "sso.oidc.clientId");
+  const oidcClientSecret = await rs(
+    sso.oidc.clientSecret,
+    "sso.oidc.clientSecret"
+  );
+  const samlCert = await rs(sso.saml.cert, "sso.saml.cert");
 
   // ── Logout ────────────────────────────────────────────────────────────────
   app.get("/proxiq/auth/logout", async (_req, reply) => {
@@ -189,25 +241,43 @@ export async function registerSsoRoutes(
 
     app.get("/proxiq/auth/google/callback", async (req, reply) => {
       const q = req.query as Record<string, string | undefined>;
-      const code = q["code"] ?? "";
-      const state = q["state"] ?? "";
-      if (!state || !consumeState(state)) return reply.status(400).send("Invalid state");
+      const code = q.code ?? "";
+      const state = q.state ?? "";
+      if (!state || !consumeState(state))
+        return reply.status(400).send("Invalid state");
 
       try {
-        const tokens = await exchangeCode("https://oauth2.googleapis.com/token", {
-          code, client_id: googleClientId, client_secret: googleClientSecret,
-          redirect_uri: callbackUrl, grant_type: "authorization_code",
-        });
-        const info = await getJson("https://openidconnect.googleapis.com/v1/userinfo", tokens["access_token"] as string);
-        const email = info["email"] as string;
+        const tokens = await exchangeCode(
+          "https://oauth2.googleapis.com/token",
+          {
+            code,
+            client_id: googleClientId,
+            client_secret: googleClientSecret,
+            redirect_uri: callbackUrl,
+            grant_type: "authorization_code",
+          }
+        );
+        const info = await getJson(
+          "https://openidconnect.googleapis.com/v1/userinfo",
+          tokens.access_token as string
+        );
+        const email = info.email as string;
 
         if (allowedDomain && !email.endsWith(`@${allowedDomain}`)) {
-          return reply.status(403).send(`Only @${allowedDomain} accounts are allowed.`);
+          return reply
+            .status(403)
+            .send(`Only @${allowedDomain} accounts are allowed.`);
         }
 
         const label = email.toLowerCase().replace(/[^a-z0-9._-]/g, "_");
         provisionSsoToken(db, email, rpmLimit);
-        setSessionCookie(reply, label, email, getSsoRole(email, adminEmails), sessionSecret);
+        setSessionCookie(
+          reply,
+          label,
+          email,
+          getSsoRole(email, adminEmails),
+          sessionSecret
+        );
         return reply.redirect("/proxiq/dashboard");
       } catch {
         return reply.status(500).send("Google auth failed. Check server logs.");
@@ -234,31 +304,46 @@ export async function registerSsoRoutes(
 
     app.get("/proxiq/auth/microsoft/callback", async (req, reply) => {
       const q = req.query as Record<string, string | undefined>;
-      const code = q["code"] ?? "";
-      const state = q["state"] ?? "";
-      if (!state || !consumeState(state)) return reply.status(400).send("Invalid state");
+      const code = q.code ?? "";
+      const state = q.state ?? "";
+      if (!state || !consumeState(state))
+        return reply.status(400).send("Invalid state");
 
       try {
         const tokens = await exchangeCode(`${authBase}/token`, {
-          code, client_id: msClientId, client_secret: msClientSecret,
-          redirect_uri: callbackUrl, grant_type: "authorization_code",
+          code,
+          client_id: msClientId,
+          client_secret: msClientSecret,
+          redirect_uri: callbackUrl,
+          grant_type: "authorization_code",
           scope: "openid email profile User.Read",
         });
-        const info = await getJson("https://graph.microsoft.com/v1.0/me", tokens["access_token"] as string);
+        const info = await getJson(
+          "https://graph.microsoft.com/v1.0/me",
+          tokens.access_token as string
+        );
         // For guest/external accounts, prefer the real email over the UPN (EXT# format)
-        const email = (
-          info["mail"] ??
-          (info["otherMails"] as string[] | undefined)?.[0] ??
-          info["userPrincipalName"]
-        ) as string;
-        console.log(`[proxiq:sso] Microsoft login — resolved email: "${email}" (mail: ${info["mail"] ?? "null"}, upn: ${info["userPrincipalName"]})`);
+        const email = (info.mail ??
+          (info.otherMails as string[] | undefined)?.[0] ??
+          info.userPrincipalName) as string;
+        console.log(
+          `[proxiq:sso] Microsoft login — resolved email: "${email}" (mail: ${info.mail ?? "null"}, upn: ${info.userPrincipalName})`
+        );
 
         const label = email.toLowerCase().replace(/[^a-z0-9._-]/g, "_");
         provisionSsoToken(db, email, rpmLimit);
-        setSessionCookie(reply, label, email, getSsoRole(email, adminEmails), sessionSecret);
+        setSessionCookie(
+          reply,
+          label,
+          email,
+          getSsoRole(email, adminEmails),
+          sessionSecret
+        );
         return reply.redirect("/proxiq/dashboard");
       } catch {
-        return reply.status(500).send("Microsoft auth failed. Check server logs.");
+        return reply
+          .status(500)
+          .send("Microsoft auth failed. Check server logs.");
       }
     });
     console.log(`[proxiq:sso] Microsoft enabled — callback: ${callbackUrl}`);
@@ -274,41 +359,80 @@ export async function registerSsoRoutes(
       const url = new URL("https://github.com/login/oauth/authorize");
       url.searchParams.set("client_id", ghClientId);
       url.searchParams.set("redirect_uri", callbackUrl);
-      url.searchParams.set("scope", allowedOrg ? "user:email read:org" : "user:email");
+      url.searchParams.set(
+        "scope",
+        allowedOrg ? "user:email read:org" : "user:email"
+      );
       url.searchParams.set("state", state);
       return reply.redirect(url.toString());
     });
 
     app.get("/proxiq/auth/github/callback", async (req, reply) => {
       const q = req.query as Record<string, string | undefined>;
-      const code = q["code"] ?? "";
-      const state = q["state"] ?? "";
-      if (!state || !consumeState(state)) return reply.status(400).send("Invalid state");
+      const code = q.code ?? "";
+      const state = q.state ?? "";
+      if (!state || !consumeState(state))
+        return reply.status(400).send("Invalid state");
 
       try {
-        const tokens = await exchangeCode("https://github.com/login/oauth/access_token", {
-          code, client_id: ghClientId, client_secret: ghClientSecret,
-          redirect_uri: callbackUrl,
-        });
-        const accessToken = tokens["access_token"] as string;
+        const tokens = await exchangeCode(
+          "https://github.com/login/oauth/access_token",
+          {
+            code,
+            client_id: ghClientId,
+            client_secret: ghClientSecret,
+            redirect_uri: callbackUrl,
+          }
+        );
+        const accessToken = tokens.access_token as string;
 
-        const emails = await getJson("https://api.github.com/user/emails", accessToken) as unknown as Array<{ email: string; primary: boolean; verified: boolean }>;
-        const primary = (emails as Array<{ email: string; primary: boolean; verified: boolean }>).find((e) => e.primary && e.verified);
-        if (!primary) return reply.status(403).send("No verified primary email found on GitHub account.");
+        const emails = (await getJson(
+          "https://api.github.com/user/emails",
+          accessToken
+        )) as unknown as Array<{
+          email: string;
+          primary: boolean;
+          verified: boolean;
+        }>;
+        const primary = (
+          emails as Array<{
+            email: string;
+            primary: boolean;
+            verified: boolean;
+          }>
+        ).find((e) => e.primary && e.verified);
+        if (!primary)
+          return reply
+            .status(403)
+            .send("No verified primary email found on GitHub account.");
 
         if (allowedOrg) {
-          const user = await getJson("https://api.github.com/user", accessToken);
-          const memberRes = await fetch(`https://api.github.com/orgs/${allowedOrg}/members/${user["login"]}`, {
-            headers: { authorization: `Bearer ${accessToken}` },
-          });
+          const user = await getJson(
+            "https://api.github.com/user",
+            accessToken
+          );
+          const memberRes = await fetch(
+            `https://api.github.com/orgs/${allowedOrg}/members/${user.login}`,
+            {
+              headers: { authorization: `Bearer ${accessToken}` },
+            }
+          );
           if (memberRes.status !== 204) {
-            return reply.status(403).send(`You must be a member of the GitHub org "${allowedOrg}".`);
+            return reply
+              .status(403)
+              .send(`You must be a member of the GitHub org "${allowedOrg}".`);
           }
         }
 
         const label = primary.email.toLowerCase().replace(/[^a-z0-9._-]/g, "_");
         provisionSsoToken(db, primary.email, rpmLimit);
-        setSessionCookie(reply, label, primary.email, getSsoRole(primary.email, adminEmails), sessionSecret);
+        setSessionCookie(
+          reply,
+          label,
+          primary.email,
+          getSsoRole(primary.email, adminEmails),
+          sessionSecret
+        );
         return reply.redirect("/proxiq/dashboard");
       } catch {
         return reply.status(500).send("GitHub auth failed. Check server logs.");
@@ -317,12 +441,22 @@ export async function registerSsoRoutes(
   }
 
   // ── Generic OIDC (Keycloak, Okta, Auth0, OneLogin, Dex…) ─────────────────
-  if (sso.oidc.enabled && oidcClientId && oidcClientSecret && sso.oidc.issuerUrl) {
+  if (
+    sso.oidc.enabled &&
+    oidcClientId &&
+    oidcClientSecret &&
+    sso.oidc.issuerUrl
+  ) {
     const { issuerUrl, allowedDomain, providerName, extraScopes } = sso.oidc;
     const clientId = oidcClientId;
     const clientSecret = oidcClientSecret;
     const callbackUrl = `${base}/proxiq/auth/oidc/callback`;
-    const scopes = ["openid", "email", "profile", ...(extraScopes ?? "").split(/\s+/).filter(Boolean)].join(" ");
+    const scopes = [
+      "openid",
+      "email",
+      "profile",
+      ...(extraScopes ?? "").split(/\s+/).filter(Boolean),
+    ].join(" ");
 
     // Fetch OIDC discovery document once at startup
     let oidcDiscovery: {
@@ -334,10 +468,15 @@ export async function registerSsoRoutes(
     const discoverUrl = `${issuerUrl.replace(/\/$/, "")}/.well-known/openid-configuration`;
     try {
       const res = await fetch(discoverUrl);
-      oidcDiscovery = await res.json() as typeof oidcDiscovery;
-      console.log(`[proxiq:sso] OIDC discovery OK for ${providerName ?? "OIDC"} (${issuerUrl})`);
+      oidcDiscovery = (await res.json()) as typeof oidcDiscovery;
+      console.log(
+        `[proxiq:sso] OIDC discovery OK for ${providerName ?? "OIDC"} (${issuerUrl})`
+      );
     } catch (err) {
-      console.error(`[proxiq:sso] FAILED to fetch OIDC discovery from ${discoverUrl}:`, err);
+      console.error(
+        `[proxiq:sso] FAILED to fetch OIDC discovery from ${discoverUrl}:`,
+        err
+      );
       // Routes still registered — discovery retried on first login attempt
     }
 
@@ -345,14 +484,19 @@ export async function registerSsoRoutes(
       if (oidcDiscovery) return oidcDiscovery;
       try {
         const res = await fetch(discoverUrl);
-        oidcDiscovery = await res.json() as typeof oidcDiscovery;
-      } catch { /* will throw below */ }
+        oidcDiscovery = (await res.json()) as typeof oidcDiscovery;
+      } catch {
+        /* will throw below */
+      }
       return oidcDiscovery;
     }
 
     app.get("/proxiq/auth/oidc/login", async (_req, reply) => {
       const disc = await getDiscovery();
-      if (!disc) return reply.status(503).send("OIDC provider unreachable. Check issuerUrl.");
+      if (!disc)
+        return reply
+          .status(503)
+          .send("OIDC provider unreachable. Check issuerUrl.");
 
       const state = newState();
       const url = new URL(disc.authorization_endpoint);
@@ -366,9 +510,10 @@ export async function registerSsoRoutes(
 
     app.get("/proxiq/auth/oidc/callback", async (req, reply) => {
       const q = req.query as Record<string, string | undefined>;
-      const code = q["code"] ?? "";
-      const state = q["state"] ?? "";
-      if (!state || !consumeState(state)) return reply.status(400).send("Invalid OIDC state");
+      const code = q.code ?? "";
+      const state = q.state ?? "";
+      if (!state || !consumeState(state))
+        return reply.status(400).send("Invalid OIDC state");
 
       const disc = await getDiscovery();
       if (!disc) return reply.status(503).send("OIDC provider unreachable.");
@@ -382,33 +527,54 @@ export async function registerSsoRoutes(
           grant_type: "authorization_code",
         });
 
-        if (tokens["error"]) {
-          console.error("[proxiq:oidc] Token exchange error:", tokens["error"], tokens["error_description"]);
-          return reply.status(401).send(`OIDC error: ${tokens["error_description"] ?? tokens["error"]}`);
+        if (tokens.error) {
+          console.error(
+            "[proxiq:oidc] Token exchange error:",
+            tokens.error,
+            tokens.error_description
+          );
+          return reply
+            .status(401)
+            .send(`OIDC error: ${tokens.error_description ?? tokens.error}`);
         }
 
-        const accessToken = tokens["access_token"] as string;
+        const accessToken = tokens.access_token as string;
         const info = await getJson(disc.userinfo_endpoint, accessToken);
 
         // Standard OIDC claim — email is in the id_token sub-claims or userinfo
-        const email = (info["email"] as string | undefined)
-          ?? (info["preferred_username"] as string | undefined)
-          ?? (info["sub"] as string | undefined);
+        const email =
+          (info.email as string | undefined) ??
+          (info.preferred_username as string | undefined) ??
+          (info.sub as string | undefined);
 
         if (!email) {
-          return reply.status(400).send("OIDC response did not include an email claim. Ensure the 'email' scope is granted.");
+          return reply
+            .status(400)
+            .send(
+              "OIDC response did not include an email claim. Ensure the 'email' scope is granted."
+            );
         }
 
         if (allowedDomain && !email.includes("@")) {
-          return reply.status(403).send(`Cannot determine domain for OIDC subject "${email}".`);
+          return reply
+            .status(403)
+            .send(`Cannot determine domain for OIDC subject "${email}".`);
         }
         if (allowedDomain && !email.endsWith(`@${allowedDomain}`)) {
-          return reply.status(403).send(`Only @${allowedDomain} accounts are allowed.`);
+          return reply
+            .status(403)
+            .send(`Only @${allowedDomain} accounts are allowed.`);
         }
 
         const label = email.toLowerCase().replace(/[^a-z0-9._-]/g, "_");
         provisionSsoToken(db, email, rpmLimit);
-        setSessionCookie(reply, label, email, getSsoRole(email, adminEmails), sessionSecret);
+        setSessionCookie(
+          reply,
+          label,
+          email,
+          getSsoRole(email, adminEmails),
+          sessionSecret
+        );
         return reply.redirect("/proxiq/dashboard");
       } catch (err) {
         console.error("[proxiq:oidc] Callback error:", err);
@@ -416,7 +582,9 @@ export async function registerSsoRoutes(
       }
     });
 
-    console.log(`[proxiq:sso] OIDC enabled (${providerName ?? "OIDC"}) — callback: ${callbackUrl}`);
+    console.log(
+      `[proxiq:sso] OIDC enabled (${providerName ?? "OIDC"}) — callback: ${callbackUrl}`
+    );
   }
 
   // ── SAML 2.0 ──────────────────────────────────────────────────────────────
@@ -467,12 +635,17 @@ export async function registerSsoRoutes(
     app.post("/proxiq/auth/saml/callback", async (req, reply) => {
       try {
         const body = req.body as Record<string, string>;
-        const samlResponse = Buffer.from(body["SAMLResponse"] ?? "", "base64").toString("utf-8");
+        const samlResponse = Buffer.from(
+          body.SAMLResponse ?? "",
+          "base64"
+        ).toString("utf-8");
 
         // Extract NameID or configured email attribute
         let email: string | null = null;
         if (emailAttribute === "nameID") {
-          const match = samlResponse.match(/<(?:saml:)?NameID[^>]*>([^<]+)<\/(?:saml:)?NameID>/);
+          const match = samlResponse.match(
+            /<(?:saml:)?NameID[^>]*>([^<]+)<\/(?:saml:)?NameID>/
+          );
           email = match?.[1] ?? null;
         } else {
           const regex = new RegExp(
@@ -482,41 +655,84 @@ export async function registerSsoRoutes(
           email = match?.[1] ?? null;
         }
 
-        if (!email) return reply.status(400).send("Could not extract email from SAML response.");
+        if (!email)
+          return reply
+            .status(400)
+            .send("Could not extract email from SAML response.");
 
         // Basic: verify IdP cert is present in response (signature validation)
-        const certClean = cert!.replace(/[\r\n\s]/g, "");
+        const certClean = cert?.replace(/[\r\n\s]/g, "");
         if (!samlResponse.includes(certClean.slice(0, 32))) {
           // Cert fragment check — for full production use, add @node-saml/node-saml
-          console.warn("[proxiq:saml] WARNING: full XML signature verification not performed. Add @node-saml/node-saml for production.");
+          console.warn(
+            "[proxiq:saml] WARNING: full XML signature verification not performed. Add @node-saml/node-saml for production."
+          );
         }
 
         const label = email.toLowerCase().replace(/[^a-z0-9._-]/g, "_");
         provisionSsoToken(db, email, rpmLimit);
-        setSessionCookie(reply, label, email, getSsoRole(email, adminEmails), sessionSecret);
+        setSessionCookie(
+          reply,
+          label,
+          email,
+          getSsoRole(email, adminEmails),
+          sessionSecret
+        );
         return reply.redirect("/proxiq/dashboard");
       } catch {
         return reply.status(500).send("SAML auth failed. Check server logs.");
       }
     });
 
-    console.log(`[proxiq:sso] SAML enabled — SP metadata: ${base}/proxiq/auth/saml/metadata`);
+    console.log(
+      `[proxiq:sso] SAML enabled — SP metadata: ${base}/proxiq/auth/saml/metadata`
+    );
     console.log(`[proxiq:sso] Register ACS URL in your IdP: ${callbackUrl}`);
   }
 
   // ── Provider buttons for login page (GET /proxiq/auth/providers) ──────────
   app.get("/proxiq/auth/providers", async () => {
-    const providers: Array<{ id: string; name: string; url: string; icon: string }> = [];
+    const providers: Array<{
+      id: string;
+      name: string;
+      url: string;
+      icon: string;
+    }> = [];
     if (sso.google.enabled && googleClientId)
-      providers.push({ id: "google",    name: "Google",    url: "/proxiq/auth/google/login",    icon: "G" });
+      providers.push({
+        id: "google",
+        name: "Google",
+        url: "/proxiq/auth/google/login",
+        icon: "G",
+      });
     if (sso.microsoft.enabled && msClientId)
-      providers.push({ id: "microsoft", name: "Microsoft", url: "/proxiq/auth/microsoft/login", icon: "M" });
+      providers.push({
+        id: "microsoft",
+        name: "Microsoft",
+        url: "/proxiq/auth/microsoft/login",
+        icon: "M",
+      });
     if (sso.github.enabled && ghClientId)
-      providers.push({ id: "github",    name: "GitHub",    url: "/proxiq/auth/github/login",    icon: "GH" });
+      providers.push({
+        id: "github",
+        name: "GitHub",
+        url: "/proxiq/auth/github/login",
+        icon: "GH",
+      });
     if (sso.oidc.enabled && oidcClientId)
-      providers.push({ id: "oidc", name: sso.oidc.providerName ?? "SSO", url: "/proxiq/auth/oidc/login", icon: "🔑" });
+      providers.push({
+        id: "oidc",
+        name: sso.oidc.providerName ?? "SSO",
+        url: "/proxiq/auth/oidc/login",
+        icon: "🔑",
+      });
     if (sso.saml.enabled && sso.saml.entryPoint)
-      providers.push({ id: "saml", name: sso.saml.providerName ?? "SSO", url: "/proxiq/auth/saml/login", icon: "SSO" });
+      providers.push({
+        id: "saml",
+        name: sso.saml.providerName ?? "SSO",
+        url: "/proxiq/auth/saml/login",
+        icon: "SSO",
+      });
     return providers;
   });
 }

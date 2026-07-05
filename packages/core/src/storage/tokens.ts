@@ -35,7 +35,9 @@ function fromRow(row: RawRow): TokenRecord {
     label: row.label,
     token: row.token,
     upstreamKey: row.upstream_key ?? undefined,
-    allowedModels: row.allowed_models ? JSON.parse(row.allowed_models) as string[] : undefined,
+    allowedModels: row.allowed_models
+      ? (JSON.parse(row.allowed_models) as string[])
+      : undefined,
     rpmLimit: row.rpm_limit,
     createdAt: row.created_at,
     lastUsedAt: row.last_used_at ?? undefined,
@@ -46,20 +48,29 @@ function fromRow(row: RawRow): TokenRecord {
 }
 
 export function listTokens(db: DB, includeRevoked = false): TokenRecord[] {
-  const rows = (includeRevoked
-    ? db.query("SELECT * FROM tokens ORDER BY created_at DESC").all()
-    : db.query("SELECT * FROM tokens WHERE revoked = 0 ORDER BY created_at DESC").all()
+  const rows = (
+    includeRevoked
+      ? db.query("SELECT * FROM tokens ORDER BY created_at DESC").all()
+      : db
+          .query(
+            "SELECT * FROM tokens WHERE revoked = 0 ORDER BY created_at DESC"
+          )
+          .all()
   ) as RawRow[];
   return rows.map(fromRow);
 }
 
 export function getTokenByLabel(db: DB, label: string): TokenRecord | null {
-  const row = db.query("SELECT * FROM tokens WHERE label = ?").get(label) as RawRow | null;
+  const row = db
+    .query("SELECT * FROM tokens WHERE label = ?")
+    .get(label) as RawRow | null;
   return row ? fromRow(row) : null;
 }
 
 export function getTokenByValue(db: DB, token: string): TokenRecord | null {
-  const row = db.query("SELECT * FROM tokens WHERE token = ? AND revoked = 0").get(token) as RawRow | null;
+  const row = db
+    .query("SELECT * FROM tokens WHERE token = ? AND revoked = 0")
+    .get(token) as RawRow | null;
   return row ? fromRow(row) : null;
 }
 
@@ -117,17 +128,24 @@ export interface UpdateTokenInput {
   policyName?: string | null;
 }
 
-export function updateToken(db: DB, label: string, updates: UpdateTokenInput): TokenRecord | null {
+export function updateToken(
+  db: DB,
+  label: string,
+  updates: UpdateTokenInput
+): TokenRecord | null {
   const existing = getTokenByLabel(db, label);
   if (!existing) return null;
 
-  const newUpstreamKey = "upstreamKey" in updates ? updates.upstreamKey : existing.upstreamKey;
-  const newAllowedModels = "allowedModels" in updates ? updates.allowedModels : existing.allowedModels;
+  const newUpstreamKey =
+    "upstreamKey" in updates ? updates.upstreamKey : existing.upstreamKey;
+  const newAllowedModels =
+    "allowedModels" in updates ? updates.allowedModels : existing.allowedModels;
   const newRpmLimit = updates.rpmLimit ?? existing.rpmLimit;
-  const newPolicyName = "policyName" in updates ? updates.policyName : existing.policyName;
+  const newPolicyName =
+    "policyName" in updates ? updates.policyName : existing.policyName;
 
   db.run(
-    `UPDATE tokens SET upstream_key = ?, allowed_models = ?, rpm_limit = ?, policy_name = ? WHERE label = ?`,
+    "UPDATE tokens SET upstream_key = ?, allowed_models = ?, rpm_limit = ?, policy_name = ? WHERE label = ?",
     newUpstreamKey ?? null,
     newAllowedModels ? JSON.stringify(newAllowedModels) : null,
     newRpmLimit,
@@ -161,10 +179,17 @@ export function getUserSummary(db: DB): Array<{
   savedUsd: number;
 }> {
   const tokens = listTokens(db, true);
-  const stats = db.query(`
+  const stats = db
+    .query(`
     SELECT user_label, COUNT(*) as reqs, SUM(cost_usd) as cost, SUM(saved_usd) as saved
     FROM request_log GROUP BY user_label
-  `).all() as Array<{ user_label: string; reqs: number; cost: number; saved: number }>;
+  `)
+    .all() as Array<{
+    user_label: string;
+    reqs: number;
+    cost: number;
+    saved: number;
+  }>;
 
   const statsByLabel = new Map(stats.map((s) => [s.user_label, s]));
 
@@ -172,7 +197,7 @@ export function getUserSummary(db: DB): Array<{
     const s = statsByLabel.get(t.label);
     return {
       label: t.label,
-      token: t.token.slice(0, 8) + "••••••••", // mask for safety
+      token: `${t.token.slice(0, 8)}••••••••`, // mask for safety
       rpmLimit: t.rpmLimit,
       allowedModels: t.allowedModels ?? null,
       policyName: t.policyName ?? null,

@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { unlinkSync, existsSync } from "node:fs";
-import { initDatabase } from "../src/storage/sqlite.js";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { existsSync, unlinkSync } from "node:fs";
 import { createMemoryStore } from "../src/memory/store.js";
+import { initDatabase } from "../src/storage/sqlite.js";
 
 const TEST_DB = "/tmp/proxiq-test-memory.db";
 

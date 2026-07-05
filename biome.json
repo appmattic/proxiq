@@ -30,15 +30,6 @@
     "clientKind": "git",
     "useIgnoreFile": true
   },
-  "assist": {
-    "actions": {
-      "source": {
-        "organizeImports": {
-          "level": "on"
-        }
-      }
-    }
-  },
   "overrides": [
     {
       "include": ["**/*.ts"],
@@ -50,6 +41,5 @@
         }
       }
     }
-  ],
-  "ignore": ["proxiq"]
+  ]
 }

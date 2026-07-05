@@ -55,7 +55,9 @@ export async function compressContext(
       return { messages, compressed: false };
     }
 
-    const data = await response.json() as { content: Array<{ text: string }> };
+    const data = (await response.json()) as {
+      content: Array<{ text: string }>;
+    };
     const summary = data.content[0]?.text ?? "";
 
     const compressedMessages: Message[] = [
@@ -65,13 +67,17 @@ export async function compressContext(
       },
       {
         role: "assistant",
-        content: "Understood. I have the context from the previous conversation.",
+        content:
+          "Understood. I have the context from the previous conversation.",
       },
       ...toKeep,
     ];
 
     logger.debug(
-      { originalTurns: messages.length, compressedTurns: compressedMessages.length },
+      {
+        originalTurns: messages.length,
+        compressedTurns: compressedMessages.length,
+      },
       "[optimizer] context compressed"
     );
 

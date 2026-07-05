@@ -1,7 +1,7 @@
-import { injectPromptCache } from "./prompt-cache.js";
-import { compressContext } from "./compressor.js";
 import type { Config } from "../config/schema.js";
 import type { RelayLogger } from "../utils/logger.js";
+import { compressContext } from "./compressor.js";
+import { injectPromptCache } from "./prompt-cache.js";
 
 export interface OptimizerPipeline {
   optimize(
@@ -25,11 +25,13 @@ export function createOptimizer(logger: RelayLogger): OptimizerPipeline {
 
       // Context compression (all providers)
       if (config.optimizer.compression.enabled) {
-        const messages = result["messages"] as Array<{ role: string; content: unknown }> | undefined;
+        const messages = result.messages as
+          | Array<{ role: string; content: unknown }>
+          | undefined;
         if (messages && messages.length > 0) {
           const { messages: compressedMessages, compressed: wasCompressed } =
             await compressContext(messages, config, authHeader, logger);
-          result["messages"] = compressedMessages;
+          result.messages = compressedMessages;
           compressed = wasCompressed;
         }
       }

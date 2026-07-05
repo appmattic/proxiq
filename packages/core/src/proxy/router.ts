@@ -24,7 +24,8 @@ export function buildForwardHeaders(
     if (lower === "host" || lower === "content-length") continue;
     // When a resolved key is available, strip the client's auth — it may be a
     // Proxiq token that should never reach the upstream provider.
-    if (configKey && (lower === "x-api-key" || lower === "authorization")) continue;
+    if (configKey && (lower === "x-api-key" || lower === "authorization"))
+      continue;
     result[lower] = value;
   }
 
@@ -33,16 +34,20 @@ export function buildForwardHeaders(
     if (provider === "anthropic") {
       result["x-api-key"] = configKey;
     } else {
-      result["authorization"] = `Bearer ${configKey}`;
+      result.authorization = `Bearer ${configKey}`;
     }
   } else {
     // No configured key — pass through whatever the client sent, converting
     // Authorization: Bearer → x-api-key for Anthropic
-    if (provider === "anthropic" && result["authorization"] && !result["x-api-key"]) {
-      const match = result["authorization"].match(/^Bearer\s+(.+)$/i);
+    if (
+      provider === "anthropic" &&
+      result.authorization &&
+      !result["x-api-key"]
+    ) {
+      const match = result.authorization.match(/^Bearer\s+(.+)$/i);
       if (match) {
         result["x-api-key"] = match[1]!;
-        delete result["authorization"];
+        result.authorization = undefined;
       }
     }
   }

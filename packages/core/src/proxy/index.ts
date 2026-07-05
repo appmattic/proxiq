@@ -1,27 +1,47 @@
-import Fastify from "fastify";
-import cors from "@fastify/cors";
 import { randomUUID } from "node:crypto";
-import { resolveProvider, buildProviderUrl } from "./providers.js";
-import { buildForwardHeaders } from "./router.js";
-import { applyModelRouter, routingHeaders } from "../router/index.js";
-import { normalizeRequest } from "../cache/index.js";
-import { getCacheStats, purgeExpiredCache, estimateCost, getStats } from "../storage/sqlite.js";
-import type { StatsPeriod } from "../storage/sqlite.js";
-import { VERSION } from "../utils/version.js";
-import type { Config } from "../config/schema.js";
-import type { DB } from "../storage/sqlite.js";
-import type { ICache } from "../cache/index.js";
-import type { MiddlewareRegistry, RelayRequest, RelayResponse } from "../middleware/types.js";
-import type { OptimizerPipeline } from "../optimizer/index.js";
-import type { MemoryEngine } from "../memory/index.js";
-import { type AuthResolver, checkRpmLimit } from "../auth/index.js";
-import { registerAdminRoutes, registerDashboardRoutes } from "../admin/index.js";
-import { registerSsoRoutes } from "../auth/sso.js";
-import { resolveSecret } from "../secrets/index.js";
 import { randomBytes as _randomBytes } from "node:crypto";
-import { scanDLP, redactDLP, detectInjection, extractRequestText, injectSystemPrompt, PolicyError } from "../policy/index.js";
+import cors from "@fastify/cors";
+import Fastify from "fastify";
+import {
+  registerAdminRoutes,
+  registerDashboardRoutes,
+} from "../admin/index.js";
+import { type AuthResolver, checkRpmLimit } from "../auth/index.js";
+import { registerSsoRoutes } from "../auth/sso.js";
+import { normalizeRequest } from "../cache/index.js";
+import type { ICache } from "../cache/index.js";
+import type { Config } from "../config/schema.js";
+import type { MemoryEngine } from "../memory/index.js";
+import type {
+  MiddlewareRegistry,
+  RelayRequest,
+  RelayResponse,
+} from "../middleware/types.js";
+import type { OptimizerPipeline } from "../optimizer/index.js";
+import {
+  PolicyError,
+  detectInjection,
+  extractRequestText,
+  injectSystemPrompt,
+  redactDLP,
+  scanDLP,
+} from "../policy/index.js";
+import type { Policy } from "../policy/types.js";
+import { applyModelRouter, routingHeaders } from "../router/index.js";
+import { resolveSecret } from "../secrets/index.js";
+import {
+  estimateCost,
+  getCacheStats,
+  getStats,
+  purgeExpiredCache,
+} from "../storage/sqlite.js";
+import type { StatsPeriod } from "../storage/sqlite.js";
+import type { DB } from "../storage/sqlite.js";
+import { getStoredPolicy, logPolicyEvent } from "../storage/sqlite.js";
 import { getTokenByLabel } from "../storage/tokens.js";
-import { logPolicyEvent, getStoredPolicy } from "../storage/sqlite.js";
+import { VERSION } from "../utils/version.js";
+import { buildProviderUrl, resolveProvider } from "./providers.js";
+import { buildForwardHeaders } from "./router.js";
 
 export interface ProxyServer {
   start(): Promise<string>;
@@ -30,11 +50,42 @@ export interface ProxyServer {
 
 export type { ProxyServer as IProxyServer };
 
+function toErrorShape(value: unknown): {
+  statusCode?: number;
+  message: string;
+  name: string;
+} {
+  if (value instanceof Error) {
+    const maybeStatus = value as Error & { statusCode?: number };
+    return {
+      statusCode: maybeStatus.statusCode,
+      message: value.message,
+      name: value.name,
+    };
+  }
+  if (typeof value === "object" && value !== null) {
+    const obj = value as {
+      statusCode?: number;
+      message?: unknown;
+      name?: unknown;
+    };
+    return {
+      statusCode: obj.statusCode,
+      message: typeof obj.message === "string" ? obj.message : "Unknown error",
+      name: typeof obj.name === "string" ? obj.name : "Error",
+    };
+  }
+  return { message: "Unknown error", name: "Error" };
+}
+
 /**
  * Parse Anthropic / OpenAI SSE chunks to extract token usage.
  * Returns { inputTokens, outputTokens } accumulated over the entire stream.
  */
-function parseSSEUsage(raw: string, provider: string): { inputTokens: number; outputTokens: number } {
+function parseSSEUsage(
+  raw: string,
+  provider: string
+): { inputTokens: number; outputTokens: number } {
   let inputTokens = 0;
   let outputTokens = 0;
 
@@ -47,17 +98,19 @@ function parseSSEUsage(raw: string, provider: string): { inputTokens: number; ou
 
       if (provider === "anthropic") {
         // message_start carries input_tokens
-        const msg = evt["message"] as Record<string, unknown> | undefined;
-        const usage1 = (msg?.["usage"] ?? evt["usage"]) as Record<string, number> | undefined;
-        if (usage1?.["input_tokens"]) inputTokens = usage1["input_tokens"];
+        const msg = evt.message as Record<string, unknown> | undefined;
+        const usage1 = (msg?.usage ?? evt.usage) as
+          | Record<string, number>
+          | undefined;
+        if (usage1?.input_tokens) inputTokens = usage1.input_tokens;
         // message_delta carries output_tokens
-        const usage2 = evt["usage"] as Record<string, number> | undefined;
-        if (usage2?.["output_tokens"]) outputTokens = usage2["output_tokens"];
+        const usage2 = evt.usage as Record<string, number> | undefined;
+        if (usage2?.output_tokens) outputTokens = usage2.output_tokens;
       } else {
         // OpenAI / compatible: usage is on final chunk
-        const usage = evt["usage"] as Record<string, number> | undefined;
-        if (usage?.["prompt_tokens"])     inputTokens = usage["prompt_tokens"];
-        if (usage?.["completion_tokens"]) outputTokens = usage["completion_tokens"];
+        const usage = evt.usage as Record<string, number> | undefined;
+        if (usage?.prompt_tokens) inputTokens = usage.prompt_tokens;
+        if (usage?.completion_tokens) outputTokens = usage.completion_tokens;
       }
     } catch {
       // skip malformed events
@@ -104,13 +157,21 @@ function wrapStreamingMetrics(
     },
     flush() {
       try {
-        const { inputTokens, outputTokens } = parseSSEUsage(accumulated, logData.provider);
+        const { inputTokens, outputTokens } = parseSSEUsage(
+          accumulated,
+          logData.provider
+        );
         const durationMs = Date.now() - logData.startMs;
 
-        const actualCost = estimateCost(logData.routedModel, inputTokens, outputTokens);
-        const originalCost = logData.originalModel !== logData.routedModel
-          ? estimateCost(logData.originalModel, inputTokens, outputTokens)
-          : actualCost;
+        const actualCost = estimateCost(
+          logData.routedModel,
+          inputTokens,
+          outputTokens
+        );
+        const originalCost =
+          logData.originalModel !== logData.routedModel
+            ? estimateCost(logData.originalModel, inputTokens, outputTokens)
+            : actualCost;
         const savedUsd = Math.max(0, originalCost - actualCost);
 
         insert.run(
@@ -160,12 +221,15 @@ export async function createProxy(
   // This catches anything that slips through to the Fastify top-level:
   // malformed JSON, unknown routes, unhandled throws in proxy handlers, etc.
   app.setErrorHandler((err, req, reply) => {
-    const status = err.statusCode ?? 500;
-    console.error(`[proxiq] ${req.method} ${req.url} → ${status}: ${err.message}`);
+    const parsed = toErrorShape(err);
+    const status = parsed.statusCode ?? 500;
+    console.error(
+      `[proxiq] ${req.method} ${req.url} → ${status}: ${parsed.message}`
+    );
     if (!reply.sent) {
       reply.status(status).send({
-        error: err.name ?? "Error",
-        message: err.message,
+        error: parsed.name,
+        message: parsed.message,
         statusCode: status,
       });
     }
@@ -176,24 +240,42 @@ export async function createProxy(
   let resolvedAdminToken: string | undefined;
   if (config.dashboard.adminToken) {
     try {
-      resolvedAdminToken = await resolveSecret(config.dashboard.adminToken, "dashboard.adminToken") ?? undefined;
+      resolvedAdminToken =
+        (await resolveSecret(
+          config.dashboard.adminToken,
+          "dashboard.adminToken"
+        )) ?? undefined;
     } catch {
-      console.warn("[proxiq:dashboard] WARNING: adminToken could not be resolved — dashboard is open");
+      console.warn(
+        "[proxiq:dashboard] WARNING: adminToken could not be resolved — dashboard is open"
+      );
     }
   }
   let sessionSecret = _randomBytes(32).toString("hex"); // ephemeral default
   if (config.dashboard.sessionSecret) {
     try {
-      sessionSecret = await resolveSecret(config.dashboard.sessionSecret, "dashboard.sessionSecret") ?? sessionSecret;
+      sessionSecret =
+        (await resolveSecret(
+          config.dashboard.sessionSecret,
+          "dashboard.sessionSecret"
+        )) ?? sessionSecret;
     } catch {
-      console.warn("[proxiq:dashboard] WARNING: sessionSecret unresolved — sessions reset on restart");
+      console.warn(
+        "[proxiq:dashboard] WARNING: sessionSecret unresolved — sessions reset on restart"
+      );
     }
   }
 
   // ── Register SSO + admin + dashboard routes ────────────────────────────────
   await registerSsoRoutes(app, db, config, sessionSecret);
   registerAdminRoutes(app, db, config, resolvedAdminToken, sessionSecret);
-  await registerDashboardRoutes(app, db, config, resolvedAdminToken, sessionSecret);
+  await registerDashboardRoutes(
+    app,
+    db,
+    config,
+    resolvedAdminToken,
+    sessionSecret
+  );
   // ──────────────────────────────────────────────────────────────────────────
 
   // Health endpoint
@@ -210,12 +292,12 @@ export async function createProxy(
   // Routing + cost stats endpoint
   app.get("/proxiq/stats", async (request) => {
     const q = request.query as Record<string, string>;
-    const period = (q["period"] ?? "today") as StatsPeriod;
+    const period = (q.period ?? "today") as StatsPeriod;
     const valid: StatsPeriod[] = ["today", "daily_avg", "weekly", "monthly"];
     if (!valid.includes(period)) {
       return { error: `Invalid period. Use one of: ${valid.join(", ")}` };
     }
-    const user = q["user"] ?? undefined;
+    const user = q.user ?? undefined;
     return getStats(db, period, user);
   });
 
@@ -229,46 +311,74 @@ export async function createProxy(
   // Main proxy route
   app.all("/v1/*", async (request, reply) => {
     const startMs = Date.now();
-    const requestId = (request.headers["x-proxiq-request-id"] as string) ?? randomUUID();
-    const sessionId = (request.headers["x-proxiq-session-id"] as string) ?? randomUUID();
+    const requestId =
+      (request.headers["x-proxiq-request-id"] as string) ?? randomUUID();
+    const sessionId =
+      (request.headers["x-proxiq-session-id"] as string) ?? randomUUID();
     const tierOverride = (request.headers["x-proxiq-tier"] as string) ?? null;
-    const providerHeader = request.headers["x-proxiq-provider"] as string | undefined;
-    const authHeader = (request.headers["authorization"] as string) ??
-                       (request.headers["x-api-key"] ? `Bearer ${request.headers["x-api-key"]}` : "");
+    const providerHeader = request.headers["x-proxiq-provider"] as
+      | string
+      | undefined;
+    const authHeader =
+      (request.headers.authorization as string) ??
+      (request.headers["x-api-key"]
+        ? `Bearer ${request.headers["x-api-key"]}`
+        : "");
 
-    const rawBody = request.body as Record<string, unknown> ?? {};
-    const bodyModel = (rawBody["model"] as string) ?? "";
+    const rawBody = (request.body as Record<string, unknown>) ?? {};
+    const bodyModel = (rawBody.model as string) ?? "";
 
     // ── Auth gate ────────────────────────────────────────────────────────────
-    const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : authHeader;
+    const bearerToken = authHeader.startsWith("Bearer ")
+      ? authHeader.slice(7)
+      : authHeader;
     const identity = bearerToken ? auth.resolve(bearerToken) : null;
 
     if (auth.required && !identity) {
-      return reply.status(401).send({ error: "Unauthorized", message: "A valid Proxiq token is required." });
+      return reply.status(401).send({
+        error: "Unauthorized",
+        message: "A valid Proxiq token is required.",
+      });
     }
 
     const userIdentity = identity ?? auth.anonymous;
 
     // Model allowlist check
-    if (identity?.allowedModels && identity.allowedModels.length > 0 && bodyModel) {
-      const allowed = identity.allowedModels.some((m) => bodyModel.includes(m) || m.includes(bodyModel));
+    if (
+      identity?.allowedModels &&
+      identity.allowedModels.length > 0 &&
+      bodyModel
+    ) {
+      const allowed = identity.allowedModels.some(
+        (m) => bodyModel.includes(m) || m.includes(bodyModel)
+      );
       if (!allowed) {
-        return reply.status(403).send({ error: "Forbidden", message: `Model "${bodyModel}" is not allowed for your token.` });
+        return reply.status(403).send({
+          error: "Forbidden",
+          message: `Model "${bodyModel}" is not allowed for your token.`,
+        });
       }
     }
 
     // RPM rate limit check
     if (!checkRpmLimit(userIdentity.label, userIdentity.rpmLimit)) {
-      return reply.status(429).send({ error: "Too Many Requests", message: `Rate limit exceeded for token "${userIdentity.label}".` });
+      return reply.status(429).send({
+        error: "Too Many Requests",
+        message: `Rate limit exceeded for token "${userIdentity.label}".`,
+      });
     }
     // ─────────────────────────────────────────────────────────────────────────
 
     // ── Policy enforcement ────────────────────────────────────────────────────
-    const tokenRecord = identity ? getTokenByLabel(db, userIdentity.label) : null;
-    const policyName  = tokenRecord?.policyName ?? null;
+    const tokenRecord = identity
+      ? getTokenByLabel(db, userIdentity.label)
+      : null;
+    const policyName = tokenRecord?.policyName ?? null;
     // DB-stored policies (created via builder) take precedence over config-file policies
     const storedPolicy = policyName ? getStoredPolicy(db, policyName) : null;
-    const policy       = storedPolicy?.config ?? (policyName ? (config.policies?.[policyName] ?? null) : null);
+    const storedPolicyConfig = storedPolicy?.config as Policy | undefined;
+    const configPolicy = policyName ? config.policies?.[policyName] : undefined;
+    const policy: Policy | null = storedPolicyConfig ?? configPolicy ?? null;
 
     // bodyForRelay starts as rawBody; redact action may swap in a sanitised copy
     let bodyForRelay: Record<string, unknown> = rawBody;
@@ -277,35 +387,53 @@ export async function createProxy(
       const requestText = extractRequestText(rawBody);
 
       // 1. DLP — scan for PII / sensitive data
-      if (policy.dlp?.enabled !== false && (policy.dlp?.detect ?? []).length > 0) {
+      if (
+        policy.dlp?.enabled !== false &&
+        (policy.dlp?.detect ?? []).length > 0
+      ) {
         const dlp = scanDLP(requestText, policy.dlp ?? {});
         if (dlp.violations.length > 0) {
           if (dlp.action === "block") {
-            logPolicyEvent(db, userIdentity.label, policyName!, "dlp_blocked", { violations: dlp.violations });
+            logPolicyEvent(db, userIdentity.label, policyName!, "dlp_blocked", {
+              violations: dlp.violations,
+            });
             return reply.status(400).send({
               error: "PolicyViolation",
               code: "DLP_BLOCKED",
-              message: "Request blocked: contains sensitive data that is not allowed by your organization's policy.",
+              message:
+                "Request blocked: contains sensitive data that is not allowed by your organization's policy.",
               violations: dlp.violations,
             });
-          } else if (dlp.action === "redact") {
+          }
+          if (dlp.action === "redact") {
             // Build a sanitised copy of the body with PII replaced in each message
             const dlpCfg = policy.dlp ?? {};
-            const msgs = rawBody["messages"];
+            const msgs = rawBody.messages;
             if (Array.isArray(msgs)) {
               bodyForRelay = {
                 ...rawBody,
                 messages: msgs.map((m: Record<string, unknown>) => {
-                  if (typeof m["content"] === "string") {
-                    return { ...m, content: redactDLP(m["content"] as string, dlpCfg) };
+                  if (typeof m.content === "string") {
+                    return {
+                      ...m,
+                      content: redactDLP(m.content as string, dlpCfg),
+                    };
                   }
                   return m;
                 }),
               };
             }
-            logPolicyEvent(db, userIdentity.label, policyName!, "dlp_redacted", { violations: dlp.violations });
+            logPolicyEvent(
+              db,
+              userIdentity.label,
+              policyName!,
+              "dlp_redacted",
+              { violations: dlp.violations }
+            );
           } else if (dlp.action === "log") {
-            logPolicyEvent(db, userIdentity.label, policyName!, "dlp_logged", { violations: dlp.violations });
+            logPolicyEvent(db, userIdentity.label, policyName!, "dlp_logged", {
+              violations: dlp.violations,
+            });
           }
         }
       }
@@ -314,11 +442,18 @@ export async function createProxy(
       if (policy.promptGuard?.enabled !== false) {
         const guard = detectInjection(requestText, policy.promptGuard ?? {});
         if (guard.blocked) {
-          logPolicyEvent(db, userIdentity.label, policyName!, "injection_blocked", { score: guard.score, matches: guard.matches });
+          logPolicyEvent(
+            db,
+            userIdentity.label,
+            policyName!,
+            "injection_blocked",
+            { score: guard.score, matches: guard.matches }
+          );
           return reply.status(400).send({
             error: "PolicyViolation",
             code: "PROMPT_INJECTION",
-            message: "Request blocked: potential prompt injection or jailbreak attempt detected.",
+            message:
+              "Request blocked: potential prompt injection or jailbreak attempt detected.",
             score: guard.score,
           });
         }
@@ -326,9 +461,20 @@ export async function createProxy(
 
       // 3. Provider allowlist
       if (policy.allowedProviders && policy.allowedProviders.length > 0) {
-        const resolvedProvider = resolveProvider(providerHeader, bodyModel, authHeader, config);
+        const resolvedProvider = resolveProvider(
+          providerHeader,
+          bodyModel,
+          authHeader,
+          config
+        );
         if (!policy.allowedProviders.includes(resolvedProvider)) {
-          logPolicyEvent(db, userIdentity.label, policyName!, "provider_blocked", { provider: resolvedProvider });
+          logPolicyEvent(
+            db,
+            userIdentity.label,
+            policyName!,
+            "provider_blocked",
+            { provider: resolvedProvider }
+          );
           return reply.status(403).send({
             error: "PolicyViolation",
             code: "PROVIDER_NOT_ALLOWED",
@@ -339,7 +485,12 @@ export async function createProxy(
     }
     // ─────────────────────────────────────────────────────────────────────────
 
-    const provider = resolveProvider(providerHeader, bodyModel, authHeader, config);
+    const provider = resolveProvider(
+      providerHeader,
+      bodyModel,
+      authHeader,
+      config
+    );
 
     // Build RelayRequest
     const incomingHeaders: Record<string, string> = {};
@@ -378,7 +529,11 @@ export async function createProxy(
 
     if (cached) {
       const durationMs = Date.now() - startMs;
-      const actualCost = estimateCost(bodyModel, cached.inputTokens, cached.outputTokens);
+      const actualCost = estimateCost(
+        bodyModel,
+        cached.inputTokens,
+        cached.outputTokens
+      );
       const cacheRes: RelayResponse = {
         id: randomUUID(),
         requestId,
@@ -395,7 +550,7 @@ export async function createProxy(
         routedModel: bodyModel,
         routingMethod: "cache",
         routingTier: "standard",
-        costUsd: 0,           // cache hit = zero cost
+        costUsd: 0, // cache hit = zero cost
         savedUsd: actualCost, // would have cost this without cache
       };
 
@@ -422,13 +577,31 @@ export async function createProxy(
     bodyToSend = routedBody;
 
     // Resolved model after routing
-    const routedModel = (bodyToSend["model"] as string) ?? bodyModel;
+    const routedModel = (bodyToSend.model as string) ?? bodyModel;
 
     // System prompt lock — inject org-mandated prompt (cannot be overridden by client)
-    if (policy?.systemPromptLock && (policy.systemPromptLock.prepend || policy.systemPromptLock.append)) {
-      const resolvedProvider = resolveProvider(providerHeader, bodyModel, authHeader, config);
-      bodyToSend = injectSystemPrompt(bodyToSend, policy.systemPromptLock, resolvedProvider) as typeof bodyToSend;
-      logPolicyEvent(db, userIdentity.label, policyName!, "system_prompt_injected", {});
+    if (
+      policy?.systemPromptLock &&
+      (policy.systemPromptLock.prepend || policy.systemPromptLock.append)
+    ) {
+      const resolvedProvider = resolveProvider(
+        providerHeader,
+        bodyModel,
+        authHeader,
+        config
+      );
+      bodyToSend = injectSystemPrompt(
+        bodyToSend,
+        policy.systemPromptLock,
+        resolvedProvider
+      ) as typeof bodyToSend;
+      logPolicyEvent(
+        db,
+        userIdentity.label,
+        policyName!,
+        "system_prompt_injected",
+        {}
+      );
     }
 
     // Optimizer
@@ -442,12 +615,17 @@ export async function createProxy(
     // Forward to upstream
     const upstreamPath = request.url.replace(/^\/v1/, "/v1");
     const upstreamUrl = buildProviderUrl(provider, upstreamPath, config);
-    const configKey = mutatedReq.upstreamKeyOverride
-      ?? config.providers.keys[provider]
-      ?? config.providers.keys["default"];
-    const forwardHeaders = buildForwardHeaders(incomingHeaders, provider, configKey);
+    const configKey =
+      mutatedReq.upstreamKeyOverride ??
+      config.providers.keys[provider] ??
+      config.providers.keys.default;
+    const forwardHeaders = buildForwardHeaders(
+      incomingHeaders,
+      provider,
+      configKey
+    );
 
-    const isStreaming = optimizedBody["stream"] === true;
+    const isStreaming = optimizedBody.stream === true;
 
     const upstreamRes = await fetch(upstreamUrl, {
       method: request.method,
@@ -456,7 +634,10 @@ export async function createProxy(
     });
 
     // Streaming response — pipe through metrics wrapper, no caching
-    if (isStreaming || upstreamRes.headers.get("content-type")?.includes("text/event-stream")) {
+    if (
+      isStreaming ||
+      upstreamRes.headers.get("content-type")?.includes("text/event-stream")
+    ) {
       const rHeaders = routingHeaders(routingResult);
       for (const [k, v] of Object.entries(rHeaders)) reply.header(k, v);
 
@@ -483,16 +664,18 @@ export async function createProxy(
     }
 
     // Non-streaming — parse, cache, record metrics
-    const upstreamBody = await upstreamRes.json() as Record<string, unknown>;
+    const upstreamBody = (await upstreamRes.json()) as Record<string, unknown>;
     const durationMs = Date.now() - startMs;
 
     // Extract token counts
-    const usage = upstreamBody["usage"] as {
-      input_tokens?: number;
-      output_tokens?: number;
-      prompt_tokens?: number;
-      completion_tokens?: number;
-    } | undefined;
+    const usage = upstreamBody.usage as
+      | {
+          input_tokens?: number;
+          output_tokens?: number;
+          prompt_tokens?: number;
+          completion_tokens?: number;
+        }
+      | undefined;
     const inputTokens = usage?.input_tokens ?? usage?.prompt_tokens ?? 0;
     const outputTokens = usage?.output_tokens ?? usage?.completion_tokens ?? 0;
 
@@ -502,17 +685,25 @@ export async function createProxy(
     }
 
     // Record memory
-    const messages = (optimizedBody["messages"] as Array<{ role: string; content: unknown }>) ?? [];
+    const messages =
+      (optimizedBody.messages as Array<{
+        role: string;
+        content: unknown;
+      }>) ?? [];
     const lastUser = messages.filter((m) => m.role === "user").at(-1);
-    const lastUserText = typeof lastUser?.content === "string" ? lastUser.content : "";
-    const assistantContent = (upstreamBody["content"] as Array<{ text: string }> | undefined)?.[0]?.text ?? "";
+    const lastUserText =
+      typeof lastUser?.content === "string" ? lastUser.content : "";
+    const assistantContent =
+      (upstreamBody.content as Array<{ text: string }> | undefined)?.[0]
+        ?.text ?? "";
     await memory.record(sessionId, lastUserText, assistantContent);
 
     // Cost calculation
     const actualCost = estimateCost(routedModel, inputTokens, outputTokens);
-    const originalCost = bodyModel !== routedModel
-      ? estimateCost(bodyModel, inputTokens, outputTokens)
-      : actualCost;
+    const originalCost =
+      bodyModel !== routedModel
+        ? estimateCost(bodyModel, inputTokens, outputTokens)
+        : actualCost;
     const savedUsd = Math.max(0, originalCost - actualCost);
 
     const relayRes: RelayResponse = {

@@ -1,15 +1,28 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { randomBytes } from "node:crypto";
-import type { DB } from "../storage/sqlite.js";
-import type { Config } from "../config/schema.js";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AuthResolver } from "../auth/index.js";
 import { verifySession } from "../auth/sso.js";
-import {
-  listTokens, upsertToken, updateToken, revokeToken, getUserSummary, getTokenByValue, getTokenByLabel,
-} from "../storage/tokens.js";
-import { getStats, getRecentPolicyEvents, listStoredPolicies, getStoredPolicy, upsertStoredPolicy, deleteStoredPolicy } from "../storage/sqlite.js";
-import type { StatsPeriod } from "../storage/sqlite.js";
+import type { Config } from "../config/schema.js";
 import { resolveSecret } from "../secrets/index.js";
+import type { DB } from "../storage/sqlite.js";
+import {
+  deleteStoredPolicy,
+  getRecentPolicyEvents,
+  getStats,
+  getStoredPolicy,
+  listStoredPolicies,
+  upsertStoredPolicy,
+} from "../storage/sqlite.js";
+import type { StatsPeriod } from "../storage/sqlite.js";
+import {
+  getTokenByLabel,
+  getTokenByValue,
+  getUserSummary,
+  listTokens,
+  revokeToken,
+  updateToken,
+  upsertToken,
+} from "../storage/tokens.js";
 
 // ---------------------------------------------------------------------------
 // Admin auth middleware
@@ -20,13 +33,17 @@ function requireAdmin(adminToken: string | undefined, sessionSecret: string) {
     if (!adminToken) return; // dev mode — no protection configured
 
     // 1. Bearer / x-admin-token header (API clients, curl)
-    const header = (req.headers["authorization"] as string | undefined)?.replace("Bearer ", "")
-      ?? (req.headers["x-admin-token"] as string | undefined);
+    const header =
+      (req.headers.authorization as string | undefined)?.replace(
+        "Bearer ",
+        ""
+      ) ?? (req.headers["x-admin-token"] as string | undefined);
     if (header === adminToken) return;
 
     // 2. Session cookie with role "admin" (dashboard JS fetches)
-    const cookieHeader = req.headers["cookie"] as string | undefined;
-    const sessionCookie = cookieHeader?.split(";")
+    const cookieHeader = req.headers.cookie as string | undefined;
+    const sessionCookie = cookieHeader
+      ?.split(";")
       .map((c) => c.trim())
       .find((c) => c.startsWith("proxiq_session="))
       ?.slice("proxiq_session=".length);
@@ -50,52 +67,81 @@ export function registerAdminRoutes(
   resolvedAdminToken: string | undefined,
   sessionSecret: string
 ): void {
-
   const guard = requireAdmin(resolvedAdminToken, sessionSecret);
 
   // ── Self-service: any logged-in user can access their own token + stats ──
 
   function requireSession() {
     return async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
-      const cookieHeader = req.headers["cookie"] as string | undefined;
-      const sessionCookie = cookieHeader?.split(";")
+      const cookieHeader = req.headers.cookie as string | undefined;
+      const sessionCookie = cookieHeader
+        ?.split(";")
         .map((c) => c.trim())
         .find((c) => c.startsWith("proxiq_session="))
         ?.slice("proxiq_session=".length);
-      if (!sessionCookie) { reply.status(401).send({ error: "Login required" }); return; }
+      if (!sessionCookie) {
+        reply.status(401).send({ error: "Login required" });
+        return;
+      }
       const sess = verifySession(sessionCookie, sessionSecret);
-      if (!sess) { reply.status(401).send({ error: "Invalid or expired session" }); return; }
-      (req as FastifyRequest & { proxiqSession: typeof sess }).proxiqSession = sess;
+      if (!sess) {
+        reply.status(401).send({ error: "Invalid or expired session" });
+        return;
+      }
+      (req as FastifyRequest & { proxiqSession: typeof sess }).proxiqSession =
+        sess;
     };
   }
 
   // GET /proxiq/me/token — full token info for the logged-in user
-  app.get("/proxiq/me/token", { preHandler: requireSession() }, async (req, reply) => {
-    const sess = (req as FastifyRequest & { proxiqSession: { label: string; email: string; role: string } }).proxiqSession;
-    const record = getTokenByLabel(db, sess.label);
-    if (!record) {
-      return reply.status(404).send({ error: "No Proxiq token found for your account. Contact your admin." });
+  app.get(
+    "/proxiq/me/token",
+    { preHandler: requireSession() },
+    async (req, reply) => {
+      const sess = (
+        req as FastifyRequest & {
+          proxiqSession: { label: string; email: string; role: string };
+        }
+      ).proxiqSession;
+      const record = getTokenByLabel(db, sess.label);
+      if (!record) {
+        return reply.status(404).send({
+          error: "No Proxiq token found for your account. Contact your admin.",
+        });
+      }
+      return {
+        label: record.label,
+        token: record.token, // full value — user is authenticated, this is their own token
+        rpmLimit: record.rpmLimit,
+        allowedModels: record.allowedModels ?? null,
+        lastUsedAt: record.lastUsedAt ?? null,
+        createdAt: record.createdAt,
+        revoked: record.revoked,
+      };
     }
-    return {
-      label: record.label,
-      token: record.token,    // full value — user is authenticated, this is their own token
-      rpmLimit: record.rpmLimit,
-      allowedModels: record.allowedModels ?? null,
-      lastUsedAt: record.lastUsedAt ?? null,
-      createdAt: record.createdAt,
-      revoked: record.revoked,
-    };
-  });
+  );
 
   // PATCH /proxiq/me/token — let user adjust their own RPM limit
-  app.patch("/proxiq/me/token", { preHandler: requireSession() }, async (req, reply) => {
-    const sess = (req as FastifyRequest & { proxiqSession: { label: string; email: string; role: string } }).proxiqSession;
-    const body = req.body as { rpmLimit?: number };
-    if (body.rpmLimit === undefined) return reply.status(400).send({ error: "rpmLimit is required" });
-    const updated = updateToken(db, sess.label, { rpmLimit: body.rpmLimit });
-    if (!updated) return reply.status(404).send({ error: "No token found for your account" });
-    return { label: updated.label, rpmLimit: updated.rpmLimit };
-  });
+  app.patch(
+    "/proxiq/me/token",
+    { preHandler: requireSession() },
+    async (req, reply) => {
+      const sess = (
+        req as FastifyRequest & {
+          proxiqSession: { label: string; email: string; role: string };
+        }
+      ).proxiqSession;
+      const body = req.body as { rpmLimit?: number };
+      if (body.rpmLimit === undefined)
+        return reply.status(400).send({ error: "rpmLimit is required" });
+      const updated = updateToken(db, sess.label, { rpmLimit: body.rpmLimit });
+      if (!updated)
+        return reply
+          .status(404)
+          .send({ error: "No token found for your account" });
+      return { label: updated.label, rpmLimit: updated.rpmLimit };
+    }
+  );
 
   // List tokens
   app.get("/proxiq/admin/tokens", { preHandler: guard }, async () => {
@@ -103,55 +149,71 @@ export function registerAdminRoutes(
   });
 
   // Create token
-  app.post("/proxiq/admin/tokens", { preHandler: guard }, async (req, reply) => {
-    const body = req.body as {
-      label?: string;
-      token?: string;
-      upstreamKey?: string;
-      allowedModels?: string[];
-      rpmLimit?: number;
-    };
+  app.post(
+    "/proxiq/admin/tokens",
+    { preHandler: guard },
+    async (req, reply) => {
+      const body = req.body as {
+        label?: string;
+        token?: string;
+        upstreamKey?: string;
+        allowedModels?: string[];
+        rpmLimit?: number;
+      };
 
-    if (!body.label) return reply.status(400).send({ error: "label is required" });
+      if (!body.label)
+        return reply.status(400).send({ error: "label is required" });
 
-    const token = body.token ?? `proxiq_${randomBytes(16).toString("hex")}`;
-    const record = upsertToken(db, {
-      label: body.label,
-      token,
-      upstreamKey: body.upstreamKey,
-      allowedModels: body.allowedModels,
-      rpmLimit: body.rpmLimit ?? 0,
-      createdBy: "admin-api",
-    });
-    return reply.status(201).send(record);
-  });
+      const token = body.token ?? `proxiq_${randomBytes(16).toString("hex")}`;
+      const record = upsertToken(db, {
+        label: body.label,
+        token,
+        upstreamKey: body.upstreamKey,
+        allowedModels: body.allowedModels,
+        rpmLimit: body.rpmLimit ?? 0,
+        createdBy: "admin-api",
+      });
+      return reply.status(201).send(record);
+    }
+  );
 
   // Get single token by label
-  app.get("/proxiq/admin/tokens/:label", { preHandler: guard }, async (req, reply) => {
-    const { label } = req.params as { label: string };
-    const token = getTokenByLabel(db, label);
-    if (!token) return reply.status(404).send({ error: "Token not found" });
-    return token;
-  });
+  app.get(
+    "/proxiq/admin/tokens/:label",
+    { preHandler: guard },
+    async (req, reply) => {
+      const { label } = req.params as { label: string };
+      const token = getTokenByLabel(db, label);
+      if (!token) return reply.status(404).send({ error: "Token not found" });
+      return token;
+    }
+  );
 
   // Update token
-  app.patch("/proxiq/admin/tokens/:label", { preHandler: guard }, async (req, reply) => {
-    const { label } = req.params as { label: string };
-    const body = req.body as {
-      upstreamKey?: string | null;
-      allowedModels?: string[] | null;
-      rpmLimit?: number;
-      policyName?: string | null;
-    };
-    const updated = updateToken(db, label, body);
-    if (!updated) return reply.status(404).send({ error: "Token not found" });
-    return updated;
-  });
+  app.patch(
+    "/proxiq/admin/tokens/:label",
+    { preHandler: guard },
+    async (req, reply) => {
+      const { label } = req.params as { label: string };
+      const body = req.body as {
+        upstreamKey?: string | null;
+        allowedModels?: string[] | null;
+        rpmLimit?: number;
+        policyName?: string | null;
+      };
+      const updated = updateToken(db, label, body);
+      if (!updated) return reply.status(404).send({ error: "Token not found" });
+      return updated;
+    }
+  );
 
   // Recent security / policy events
   app.get("/proxiq/admin/policy-events", { preHandler: guard }, async (req) => {
     const { limit = "50" } = req.query as { limit?: string };
-    return getRecentPolicyEvents(db, Math.min(parseInt(limit) || 50, 200));
+    return getRecentPolicyEvents(
+      db,
+      Math.min(Number.parseInt(limit) || 50, 200)
+    );
   });
 
   // ── Policy CRUD ────────────────────────────────────────────────────────────
@@ -165,7 +227,8 @@ export function registerAdminRoutes(
       .filter(([name]) => !dbNames.has(name))
       .map(([name, cfg]) => ({
         name,
-        displayName: (cfg as Record<string, unknown>).name as string | null ?? null,
+        displayName:
+          ((cfg as Record<string, unknown>).name as string | null) ?? null,
         config: cfg,
         createdAt: null,
         updatedAt: null,
@@ -178,51 +241,98 @@ export function registerAdminRoutes(
   });
 
   // Get single policy
-  app.get("/proxiq/admin/policies/:name", { preHandler: guard }, async (req, reply) => {
-    const { name } = req.params as { name: string };
-    const stored = getStoredPolicy(db, name);
-    if (stored) return { ...stored, source: "db" };
-    const cfgPolicy = config.policies?.[name];
-    if (cfgPolicy) return { name, displayName: null, config: cfgPolicy, source: "config" };
-    reply.status(404).send({ error: "Policy not found" });
-  });
+  app.get(
+    "/proxiq/admin/policies/:name",
+    { preHandler: guard },
+    async (req, reply) => {
+      const { name } = req.params as { name: string };
+      const stored = getStoredPolicy(db, name);
+      if (stored) return { ...stored, source: "db" };
+      const cfgPolicy = config.policies?.[name];
+      if (cfgPolicy)
+        return { name, displayName: null, config: cfgPolicy, source: "config" };
+      reply.status(404).send({ error: "Policy not found" });
+    }
+  );
 
   // Create / replace policy
-  app.post("/proxiq/admin/policies", { preHandler: guard }, async (req, reply) => {
-    const body = req.body as { name?: string; displayName?: string; config?: Record<string, unknown> };
-    if (!body.name) return reply.status(400).send({ error: "name is required" });
-    if (!body.config) return reply.status(400).send({ error: "config is required" });
-    // Slug-ify the name
-    const name = body.name.trim().toLowerCase().replace(/[^a-z0-9-_]/g, "-");
-    const policy = upsertStoredPolicy(db, name, body.displayName ?? body.name, body.config);
-    reply.status(201).send({ ...policy, source: "db" });
-  });
+  app.post(
+    "/proxiq/admin/policies",
+    { preHandler: guard },
+    async (req, reply) => {
+      const body = req.body as {
+        name?: string;
+        displayName?: string;
+        config?: Record<string, unknown>;
+      };
+      if (!body.name)
+        return reply.status(400).send({ error: "name is required" });
+      if (!body.config)
+        return reply.status(400).send({ error: "config is required" });
+      // Slug-ify the name
+      const name = body.name
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9-_]/g, "-");
+      const policy = upsertStoredPolicy(
+        db,
+        name,
+        body.displayName ?? body.name,
+        body.config
+      );
+      reply.status(201).send({ ...policy, source: "db" });
+    }
+  );
 
   // Update policy
-  app.put("/proxiq/admin/policies/:name", { preHandler: guard }, async (req, reply) => {
-    const { name } = req.params as { name: string };
-    const body = req.body as { displayName?: string; config?: Record<string, unknown> };
-    if (!body.config) return reply.status(400).send({ error: "config is required" });
-    const existing = getStoredPolicy(db, name);
-    const policy = upsertStoredPolicy(db, name, body.displayName ?? existing?.displayName ?? name, body.config);
-    return { ...policy, source: "db" };
-  });
+  app.put(
+    "/proxiq/admin/policies/:name",
+    { preHandler: guard },
+    async (req, reply) => {
+      const { name } = req.params as { name: string };
+      const body = req.body as {
+        displayName?: string;
+        config?: Record<string, unknown>;
+      };
+      if (!body.config)
+        return reply.status(400).send({ error: "config is required" });
+      const existing = getStoredPolicy(db, name);
+      const policy = upsertStoredPolicy(
+        db,
+        name,
+        body.displayName ?? existing?.displayName ?? name,
+        body.config
+      );
+      return { ...policy, source: "db" };
+    }
+  );
 
   // Delete policy
-  app.delete("/proxiq/admin/policies/:name", { preHandler: guard }, async (req, reply) => {
-    const { name } = req.params as { name: string };
-    const ok = deleteStoredPolicy(db, name);
-    if (!ok) return reply.status(404).send({ error: "Policy not found or is a config-file policy (cannot delete)" });
-    return { deleted: true };
-  });
+  app.delete(
+    "/proxiq/admin/policies/:name",
+    { preHandler: guard },
+    async (req, reply) => {
+      const { name } = req.params as { name: string };
+      const ok = deleteStoredPolicy(db, name);
+      if (!ok)
+        return reply.status(404).send({
+          error: "Policy not found or is a config-file policy (cannot delete)",
+        });
+      return { deleted: true };
+    }
+  );
 
   // Revoke token
-  app.delete("/proxiq/admin/tokens/:label", { preHandler: guard }, async (req, reply) => {
-    const { label } = req.params as { label: string };
-    const ok = revokeToken(db, label);
-    if (!ok) return reply.status(404).send({ error: "Token not found" });
-    return { revoked: true, label };
-  });
+  app.delete(
+    "/proxiq/admin/tokens/:label",
+    { preHandler: guard },
+    async (req, reply) => {
+      const { label } = req.params as { label: string };
+      const ok = revokeToken(db, label);
+      if (!ok) return reply.status(404).send({ error: "Token not found" });
+      return { revoked: true, label };
+    }
+  );
 
   // Per-user summary
   app.get("/proxiq/admin/users", { preHandler: guard }, async (req) => {
@@ -234,8 +344,8 @@ export function registerAdminRoutes(
   // Stats (all users or filtered)
   app.get("/proxiq/admin/stats", { preHandler: guard }, async (req) => {
     const q = req.query as Record<string, string>;
-    const period = (q["period"] ?? "today") as StatsPeriod;
-    const user = q["user"] ?? undefined;
+    const period = (q.period ?? "today") as StatsPeriod;
+    const user = q.user ?? undefined;
     return getStats(db, period, user);
   });
 }
@@ -251,14 +361,19 @@ export async function registerDashboardRoutes(
   resolvedAdminToken: string | undefined,
   sessionSecret: string
 ): Promise<void> {
-
   // Resolve local admin credentials at startup (before registering the scoped plugin)
   let resolvedAdminPassword: string | undefined;
   if (config.dashboard.adminPassword) {
     try {
-      resolvedAdminPassword = await resolveSecret(config.dashboard.adminPassword, "dashboard.adminPassword") ?? undefined;
+      resolvedAdminPassword =
+        (await resolveSecret(
+          config.dashboard.adminPassword,
+          "dashboard.adminPassword"
+        )) ?? undefined;
     } catch {
-      console.warn("[proxiq:dashboard] WARNING: adminPassword could not be resolved — local login disabled");
+      console.warn(
+        "[proxiq:dashboard] WARNING: adminPassword could not be resolved — local login disabled"
+      );
     }
   }
   const adminUsername = config.dashboard.adminUsername ?? "admin";
@@ -267,6 +382,12 @@ export async function registerDashboardRoutes(
   // ── Scoped plugin — gets its own error handler + content-type parser
   //    without conflicting with the top-level app error handler ─────────────
   await app.register(async (scoped) => {
+    const asErrorLike = (value: unknown): { statusCode?: number } => {
+      if (typeof value === "object" && value !== null) {
+        return value as { statusCode?: number };
+      }
+      return {};
+    };
 
     // Parse HTML form bodies (login submits application/x-www-form-urlencoded)
     scoped.addContentTypeParser(
@@ -276,7 +397,9 @@ export async function registerDashboardRoutes(
         try {
           const params = new URLSearchParams(body as string);
           const result: Record<string, string> = {};
-          params.forEach((v, k) => { result[k] = v; });
+          params.forEach((v, k) => {
+            result[k] = v;
+          });
           done(null, result);
         } catch (err) {
           done(err as Error, undefined);
@@ -286,19 +409,21 @@ export async function registerDashboardRoutes(
 
     // Scoped error handler — HTML pages return a styled login page, not raw JSON
     scoped.setErrorHandler((err, _req, reply) => {
-      const status = err.statusCode ?? 500;
-      const msg = status === 415
-        ? "Form submission error — please try again."
-        : status === 401 || status === 403
-          ? "Access denied."
-          : `An unexpected error occurred (${status}).`;
+      const status = asErrorLike(err).statusCode ?? 500;
+      const msg =
+        status === 415
+          ? "Form submission error — please try again."
+          : status === 401 || status === 403
+            ? "Access denied."
+            : `An unexpected error occurred (${status}).`;
       reply.header("content-type", "text/html; charset=utf-8").status(status);
       return loginHtml(config, hasLocalAuth, msg);
     });
 
     function getSession(req: FastifyRequest) {
-      const cookieHeader = req.headers["cookie"] as string | undefined;
-      const sessionCookie = cookieHeader?.split(";")
+      const cookieHeader = req.headers.cookie as string | undefined;
+      const sessionCookie = cookieHeader
+        ?.split(";")
         .map((c) => c.trim())
         .find((c) => c.startsWith("proxiq_session="))
         ?.slice("proxiq_session=".length);
@@ -328,14 +453,32 @@ export async function registerDashboardRoutes(
       try {
         body = (req.body ?? {}) as typeof body;
       } catch {
-        return loginHtml(config, hasLocalAuth, "Could not read form data — please try again.");
+        return loginHtml(
+          config,
+          hasLocalAuth,
+          "Could not read form data — please try again."
+        );
       }
 
       // ── Username + password ──
       if (body.username !== undefined || body.password !== undefined) {
-        if (hasLocalAuth && body.username === adminUsername && body.password === resolvedAdminPassword) {
-          const s = buildSession({ label: "__admin__", email: `${adminUsername}@local`, role: "admin" }, sessionSecret);
-          reply.header("set-cookie", `proxiq_session=${s}; Path=/proxiq; HttpOnly; SameSite=Lax; Max-Age=86400`);
+        if (
+          hasLocalAuth &&
+          body.username === adminUsername &&
+          body.password === resolvedAdminPassword
+        ) {
+          const s = buildSession(
+            {
+              label: "__admin__",
+              email: `${adminUsername}@local`,
+              role: "admin",
+            },
+            sessionSecret
+          );
+          reply.header(
+            "set-cookie",
+            `proxiq_session=${s}; Path=/proxiq; HttpOnly; SameSite=Lax; Max-Age=86400`
+          );
           return reply.redirect("/proxiq/dashboard");
         }
         return loginHtml(config, hasLocalAuth, "Invalid username or password.");
@@ -343,20 +486,32 @@ export async function registerDashboardRoutes(
 
       // ── API token ──
       const token = (body.token ?? "").trim();
-      if (!token) return loginHtml(config, hasLocalAuth, "Please enter a token.");
+      if (!token)
+        return loginHtml(config, hasLocalAuth, "Please enter a token.");
 
       if (resolvedAdminToken && token === resolvedAdminToken) {
-        const s = buildSession({ label: "__admin__", email: "admin@local", role: "admin" }, sessionSecret);
-        reply.header("set-cookie", `proxiq_session=${s}; Path=/proxiq; HttpOnly; SameSite=Lax; Max-Age=86400`);
+        const s = buildSession(
+          { label: "__admin__", email: "admin@local", role: "admin" },
+          sessionSecret
+        );
+        reply.header(
+          "set-cookie",
+          `proxiq_session=${s}; Path=/proxiq; HttpOnly; SameSite=Lax; Max-Age=86400`
+        );
       } else {
         const record = getTokenByValue(db, token);
         if (!record) return loginHtml(config, hasLocalAuth, "Invalid token.");
-        const s = buildSession({ label: record.label, email: record.label, role: "user" }, sessionSecret);
-        reply.header("set-cookie", `proxiq_session=${s}; Path=/proxiq; HttpOnly; SameSite=Lax; Max-Age=86400`);
+        const s = buildSession(
+          { label: record.label, email: record.label, role: "user" },
+          sessionSecret
+        );
+        reply.header(
+          "set-cookie",
+          `proxiq_session=${s}; Path=/proxiq; HttpOnly; SameSite=Lax; Max-Age=86400`
+        );
       }
       return reply.redirect("/proxiq/dashboard");
     });
-
   }); // end scoped plugin
 }
 
@@ -372,42 +527,65 @@ function buildSession(payload: object, secret: string): string {
 // Login HTML
 // ---------------------------------------------------------------------------
 
-function loginHtml(config: Config, hasLocalAuth: boolean, error?: string): string {
+function loginHtml(
+  config: Config,
+  hasLocalAuth: boolean,
+  error?: string
+): string {
   const sso = config.dashboard.sso;
-  const hasSSO = sso.enabled && (
-    (sso.google.enabled && !!sso.google.clientId) ||
-    (sso.microsoft.enabled && !!sso.microsoft.clientId) ||
-    (sso.github.enabled && !!sso.github.clientId) ||
-    (sso.saml.enabled && !!sso.saml.entryPoint)
-  );
+  const hasSSO =
+    sso.enabled &&
+    ((sso.google.enabled && !!sso.google.clientId) ||
+      (sso.microsoft.enabled && !!sso.microsoft.clientId) ||
+      (sso.github.enabled && !!sso.github.clientId) ||
+      (sso.saml.enabled && !!sso.saml.entryPoint));
 
-  const ssoButtons = !hasSSO ? "" : `
+  const ssoButtons = !hasSSO
+    ? ""
+    : `
     <div class="divider"><span>or sign in with</span></div>
     <div class="sso-buttons">
-      ${sso.google.enabled && sso.google.clientId ? `
+      ${
+        sso.google.enabled && sso.google.clientId
+          ? `
         <a href="/proxiq/auth/google/login" class="sso-btn google">
           <svg viewBox="0 0 24 24" width="18" height="18"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
           Continue with Google
-        </a>` : ""}
-      ${sso.microsoft.enabled && sso.microsoft.clientId ? `
+        </a>`
+          : ""
+      }
+      ${
+        sso.microsoft.enabled && sso.microsoft.clientId
+          ? `
         <a href="/proxiq/auth/microsoft/login" class="sso-btn microsoft">
           <svg viewBox="0 0 23 23" width="18" height="18"><path fill="#f3f3f3" d="M0 0h23v23H0z"/><path fill="#f35325" d="M1 1h10v10H1z"/><path fill="#81bc06" d="M12 1h10v10H12z"/><path fill="#05a6f0" d="M1 12h10v10H1z"/><path fill="#ffba08" d="M12 12h10v10H12z"/></svg>
           Continue with Microsoft
-        </a>` : ""}
-      ${sso.github.enabled && sso.github.clientId ? `
+        </a>`
+          : ""
+      }
+      ${
+        sso.github.enabled && sso.github.clientId
+          ? `
         <a href="/proxiq/auth/github/login" class="sso-btn github">
           <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
           Continue with GitHub
-        </a>` : ""}
-      ${sso.saml.enabled && sso.saml.entryPoint ? `
+        </a>`
+          : ""
+      }
+      ${
+        sso.saml.enabled && sso.saml.entryPoint
+          ? `
         <a href="/proxiq/auth/saml/login" class="sso-btn saml">
           <span style="font-weight:700;font-size:13px">SSO</span>
           Continue with ${sso.saml.providerName ?? "SSO"}
-        </a>` : ""}
+        </a>`
+          : ""
+      }
     </div>`;
 
   // Build tab content — credentials tab shown if local auth configured
-  const credForm = hasLocalAuth ? `
+  const credForm = hasLocalAuth
+    ? `
     <div id="tab-cred" class="tab-panel">
       <form method="POST" action="/proxiq/dashboard/login">
         <label>Username</label>
@@ -416,7 +594,8 @@ function loginHtml(config: Config, hasLocalAuth: boolean, error?: string): strin
         <input type="password" name="password" placeholder="••••••••" autocomplete="current-password" required>
         <button type="submit" class="btn">Sign In</button>
       </form>
-    </div>` : "";
+    </div>`
+    : "";
 
   const tokenForm = `
     <div id="tab-token" class="tab-panel" ${hasLocalAuth ? `style="display:none"` : ""}>
@@ -427,11 +606,13 @@ function loginHtml(config: Config, hasLocalAuth: boolean, error?: string): strin
       </form>
     </div>`;
 
-  const tabs = hasLocalAuth ? `
+  const tabs = hasLocalAuth
+    ? `
     <div class="tabs">
       <button class="tab active" onclick="switchTab('cred',this)">Credentials</button>
       <button class="tab" onclick="switchTab('token',this)">API Token</button>
-    </div>` : "";
+    </div>`
+    : "";
 
   return `<!DOCTYPE html><html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -882,7 +1063,9 @@ function dashboardHtml(
   <div class="nav-spacer"></div>
   <div class="status-dot" id="status-dot" title="Checking…"></div>
   <button class="theme-btn" id="theme-btn" title="Toggle theme" onclick="toggleTheme()">🌙</button>
-  ${isLoggedIn ? `
+  ${
+    isLoggedIn
+      ? `
   <div class="nav-divider"></div>
   <div class="nav-user">
     <div class="avatar">${userLabel.slice(0, 2).toUpperCase()}</div>
@@ -890,13 +1073,18 @@ function dashboardHtml(
     ${isAdmin ? '<span class="badge badge-purple">admin</span>' : ""}
   </div>
   <a href="/proxiq/auth/logout" class="logout-link">Sign out</a>
-  ` : `<a href="/proxiq/dashboard/login" class="btn btn-primary btn-sm">Sign In</a>`}
+  `
+      : `<a href="/proxiq/dashboard/login" class="btn btn-primary btn-sm">Sign In</a>`
+  }
 </nav>
 
 <div class="period-bar">
-  ${["today","weekly","monthly","daily_avg"].map((p) =>
-    `<button class="period-btn${p === "today" ? " active" : ""}" data-period="${p}" onclick="setPeriod('${p}')">${p.replace("_"," ")}</button>`
-  ).join("")}
+  ${["today", "weekly", "monthly", "daily_avg"]
+    .map(
+      (p) =>
+        `<button class="period-btn${p === "today" ? " active" : ""}" data-period="${p}" onclick="setPeriod('${p}')">${p.replace("_", " ")}</button>`
+    )
+    .join("")}
   <div style="flex:1"></div>
   <span style="font-size:11px;color:var(--text-dim)" id="last-updated"></span>
 </div>
@@ -945,7 +1133,9 @@ function dashboardHtml(
     <div class="table-wrap" id="switches-body"><div class="loading">Loading…</div></div>
   </div>
 
-  ${isAdmin ? `
+  ${
+    isAdmin
+      ? `
   <div class="section">
     <div class="section-header">
       <span class="section-title">Users</span>
@@ -975,7 +1165,8 @@ function dashboardHtml(
     </div>
     <div class="table-wrap" id="policy-events-body"><div class="loading">Loading…</div></div>
   </div>
-  ` : `
+  `
+      : `
   <div class="section">
     <div class="section-header">
       <span class="section-title">Your API Token</span>
@@ -987,7 +1178,8 @@ function dashboardHtml(
     <div class="section-header"><span class="section-title">Your Usage</span></div>
     <div class="table-wrap" id="my-stats-body"><div class="loading">Loading…</div></div>
   </div>
-  `}
+  `
+  }
 
 </div><!-- .page -->
 
@@ -1122,11 +1314,11 @@ function dashboardHtml(
     <div id="pb-dlp-section">
       <div class="pb-sub" style="margin-bottom:10px">Scan for PII patterns in user messages:</div>
       <div class="pb-patterns" id="pb-dlp-patterns">
-        ${["credit_card","ssn","iban","api_key","email","phone","passport"].map((p) => `<label class="pb-pat-label"><input type="checkbox" class="pb-dlp-pat" value="${p}" checked>${p.replace("_"," ")}</label>`).join("")}
+        ${["credit_card", "ssn", "iban", "api_key", "email", "phone", "passport"].map((p) => `<label class="pb-pat-label"><input type="checkbox" class="pb-dlp-pat" value="${p}" checked>${p.replace("_", " ")}</label>`).join("")}
       </div>
       <div class="pb-action-row">
         <span class="pb-sub">Action:</span>
-        ${["block","redact","log"].map((a) => `<label class="pb-action-label"><input type="radio" name="pb-dlp-action" value="${a}" ${a === "block" ? "checked" : ""}>${a}</label>`).join("")}
+        ${["block", "redact", "log"].map((a) => `<label class="pb-action-label"><input type="radio" name="pb-dlp-action" value="${a}" ${a === "block" ? "checked" : ""}>${a}</label>`).join("")}
       </div>
     </div>
 
@@ -1188,7 +1380,7 @@ function dashboardHtml(
       <span class="pb-section-desc">Leave all unchecked to allow all providers</span>
     </div>
     <div class="pb-providers" id="pb-providers">
-      ${["anthropic","openai","azure-openai","gemini","mistral","groq","together","custom"].map((p) => `<label class="pb-prov-label"><input type="checkbox" class="pb-prov" value="${p}">${p}</label>`).join("")}
+      ${["anthropic", "openai", "azure-openai", "gemini", "mistral", "groq", "together", "custom"].map((p) => `<label class="pb-prov-label"><input type="checkbox" class="pb-prov" value="${p}">${p}</label>`).join("")}
     </div>
 
     <hr class="pb-hr">

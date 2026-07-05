@@ -8,7 +8,7 @@ export function registerStatus(program: Command): void {
     .option("--port <port>", "Port to check", "3099")
     .action(async (opts: { port: string }) => {
       const pid = readPidFile();
-      const port = parseInt(opts.port, 10);
+      const port = Number.parseInt(opts.port, 10);
 
       if (!pid) {
         console.log("Status: stopped (no PID file)");
@@ -18,16 +18,23 @@ export function registerStatus(program: Command): void {
       try {
         const res = await fetch(`http://127.0.0.1:${port}/proxiq/health`);
         if (res.ok) {
-          const data = await res.json() as { status: string; version: string };
+          const data = (await res.json()) as {
+            status: string;
+            version: string;
+          };
           console.log(`Status:  running (PID ${pid})`);
           console.log(`Version: ${data.version}`);
           console.log(`Health:  ${data.status}`);
           console.log(`URL:     http://127.0.0.1:${port}`);
         } else {
-          console.log(`Status:  running (PID ${pid}) but health check failed (HTTP ${res.status})`);
+          console.log(
+            `Status:  running (PID ${pid}) but health check failed (HTTP ${res.status})`
+          );
         }
       } catch {
-        console.log(`Status:  PID ${pid} exists but proxy not responding on port ${port}`);
+        console.log(
+          `Status:  PID ${pid} exists but proxy not responding on port ${port}`
+        );
       }
     });
 }

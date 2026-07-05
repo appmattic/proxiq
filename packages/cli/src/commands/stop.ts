@@ -16,7 +16,9 @@ export function registerStop(program: Command): void {
         removePidFile();
         console.log(`Proxiq (PID ${pid}) stopped.`);
       } catch {
-        console.error(`Failed to stop Proxiq (PID ${pid}). Process may have already exited.`);
+        console.error(
+          `Failed to stop Proxiq (PID ${pid}). Process may have already exited.`
+        );
         removePidFile();
       }
     });

@@ -1,7 +1,7 @@
-import { resolveSecret } from "../secrets/index.js";
-import { upsertToken, getTokenByValue, touchToken } from "../storage/tokens.js";
-import type { DB } from "../storage/sqlite.js";
 import type { Config } from "../config/schema.js";
+import { resolveSecret } from "../secrets/index.js";
+import type { DB } from "../storage/sqlite.js";
+import { getTokenByValue, touchToken, upsertToken } from "../storage/tokens.js";
 
 export interface TokenIdentity {
   label: string;
@@ -49,27 +49,43 @@ export function checkRpmLimit(label: string, limit: number): boolean {
  *   are recognised immediately without restart.
  * - Calls touchToken() on each resolved request to update last_used_at.
  */
-export async function createAuthResolver(config: Config, db: DB): Promise<AuthResolver> {
+export async function createAuthResolver(
+  config: Config,
+  db: DB
+): Promise<AuthResolver> {
   // Seed from config — resolve env refs and upsert into DB
   for (const entry of config.auth.tokens) {
     let resolvedToken: string | undefined;
     try {
-      resolvedToken = await resolveSecret(entry.token, `auth.tokens[${entry.label}].token`);
+      resolvedToken = await resolveSecret(
+        entry.token,
+        `auth.tokens[${entry.label}].token`
+      );
     } catch (err) {
-      console.warn(`[proxiq:auth] WARNING: skipping token "${entry.label}" — ${(err as Error).message}`);
+      console.warn(
+        `[proxiq:auth] WARNING: skipping token "${entry.label}" — ${(err as Error).message}`
+      );
       continue;
     }
     if (!resolvedToken) {
-      console.warn(`[proxiq:auth] WARNING: token for label "${entry.label}" is empty — skipping`);
+      console.warn(
+        `[proxiq:auth] WARNING: token for label "${entry.label}" is empty — skipping`
+      );
       continue;
     }
 
     let resolvedKey: string | undefined;
     if (entry.upstreamKey) {
       try {
-        resolvedKey = await resolveSecret(entry.upstreamKey, `auth.tokens[${entry.label}].upstreamKey`) ?? undefined;
+        resolvedKey =
+          (await resolveSecret(
+            entry.upstreamKey,
+            `auth.tokens[${entry.label}].upstreamKey`
+          )) ?? undefined;
       } catch (err) {
-        console.warn(`[proxiq:auth] WARNING: upstreamKey for "${entry.label}" unresolved — using global key. ${(err as Error).message}`);
+        console.warn(
+          `[proxiq:auth] WARNING: upstreamKey for "${entry.label}" unresolved — using global key. ${(err as Error).message}`
+        );
       }
     }
 
@@ -93,7 +109,11 @@ export async function createAuthResolver(config: Config, db: DB): Promise<AuthRe
       if (!record) return null;
 
       // Fire-and-forget touch (non-blocking)
-      try { touchToken(db, record.label); } catch { /* ignore */ }
+      try {
+        touchToken(db, record.label);
+      } catch {
+        /* ignore */
+      }
 
       return {
         label: record.label,

@@ -1,11 +1,11 @@
 const DEFAULT_PROXIQ_URL = "http://127.0.0.1:3099";
 
 export function getProxiqBaseUrl(): string {
-  return process.env["PROXIQ_URL"] ?? DEFAULT_PROXIQ_URL;
+  return process.env.PROXIQ_URL ?? DEFAULT_PROXIQ_URL;
 }
 
 export function isProxiqEnabled(): boolean {
-  return process.env["PROXIQ_ENABLED"] !== "false";
+  return process.env.PROXIQ_ENABLED !== "false";
 }
 
 /**
@@ -19,6 +19,6 @@ export function isProxiqEnabled(): boolean {
  */
 export function relay<T extends object>(client: T): T {
   if (!isProxiqEnabled()) return client;
-  (client as Record<string, unknown>)["baseURL"] = getProxiqBaseUrl();
+  (client as Record<string, unknown>).baseURL = getProxiqBaseUrl();
   return client;
 }

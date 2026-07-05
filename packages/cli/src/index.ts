@@ -1,12 +1,12 @@
 #!/usr/bin/env bun
-import { Command } from "commander";
 import { VERSION } from "@proxiq/core";
-import { registerStart } from "./commands/start.js";
-import { registerStop } from "./commands/stop.js";
-import { registerStatus } from "./commands/status.js";
-import { registerStats } from "./commands/stats.js";
+import { Command } from "commander";
 import { registerCache } from "./commands/cache.js";
 import { registerConfig } from "./commands/config.js";
+import { registerStart } from "./commands/start.js";
+import { registerStats } from "./commands/stats.js";
+import { registerStatus } from "./commands/status.js";
+import { registerStop } from "./commands/stop.js";
 
 const program = new Command();
 

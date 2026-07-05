@@ -1,14 +1,24 @@
-import { applyRules } from "./rules.js";
-import { classifyWithHaiku } from "./classifier.js";
 import type { Config } from "../config/schema.js";
+import { classifyWithHaiku } from "./classifier.js";
+import { applyRules } from "./rules.js";
 
 // Parameters that must be stripped per model family.
 // Claude Code sends `output_config: { effort: "high" }` for extended thinking — Haiku doesn't support it.
 // "effort" (top-level) is also stripped universally as a safety net.
 const UNIVERSAL_UNSUPPORTED = new Set(["effort"]);
-const HAIKU_UNSUPPORTED = new Set(["effort", "thinking", "budget_tokens", "betas", "output_config", "context_management"]);
+const HAIKU_UNSUPPORTED = new Set([
+  "effort",
+  "thinking",
+  "budget_tokens",
+  "betas",
+  "output_config",
+  "context_management",
+]);
 
-function sanitizeBody(body: Record<string, unknown>, model?: string): Record<string, unknown> {
+function sanitizeBody(
+  body: Record<string, unknown>,
+  model?: string
+): Record<string, unknown> {
   const isHaiku = model?.includes("haiku") ?? false;
   const unsupported = isHaiku ? HAIKU_UNSUPPORTED : UNIVERSAL_UNSUPPORTED;
 
@@ -46,12 +56,18 @@ export async function applyModelRouter(
   tierOverride: string | null
 ): Promise<RouterOutput> {
   if (config.routing.mode === "off" && !tierOverride) {
-    const model = (body["model"] as string) ?? config.routing.tiers.standard;
-    return { body: sanitizeBody(body, model), result: { tier: "standard", method: "default", model } };
+    const model = (body.model as string) ?? config.routing.tiers.standard;
+    return {
+      body: sanitizeBody(body, model),
+      result: { tier: "standard", method: "default", model },
+    };
   }
 
   // 1. Explicit header override
-  if (tierOverride && ["simple", "standard", "complex"].includes(tierOverride)) {
+  if (
+    tierOverride &&
+    ["simple", "standard", "complex"].includes(tierOverride)
+  ) {
     const tier = tierOverride as Tier;
     const model = config.routing.tiers[tier];
     return {
@@ -61,7 +77,8 @@ export async function applyModelRouter(
   }
 
   // Extract last user message for rule/classifier evaluation
-  const messages = (body["messages"] as Array<{ role: string; content: unknown }>) ?? [];
+  const messages =
+    (body.messages as Array<{ role: string; content: unknown }>) ?? [];
   const lastUser = messages.filter((m) => m.role === "user").at(-1);
   const lastUserText =
     typeof lastUser?.content === "string"
@@ -91,11 +108,16 @@ export async function applyModelRouter(
     }
   }
 
-  const defaultModel = (body["model"] as string) ?? config.routing.tiers.standard;
-  return { body: sanitizeBody(body, defaultModel), result: { tier: "standard", method: "default", model: defaultModel } };
+  const defaultModel = (body.model as string) ?? config.routing.tiers.standard;
+  return {
+    body: sanitizeBody(body, defaultModel),
+    result: { tier: "standard", method: "default", model: defaultModel },
+  };
 }
 
-export function routingHeaders(result: ClassificationResult): Record<string, string> {
+export function routingHeaders(
+  result: ClassificationResult
+): Record<string, string> {
   return {
     "x-proxiq-routed-tier": result.tier,
     "x-proxiq-routed-model": result.model,

@@ -1,5 +1,5 @@
-import type { RelayMiddleware, RelayRequest, RelayResponse } from "../types.js";
 import type { RelayLogger } from "../../utils/logger.js";
+import type { RelayMiddleware, RelayRequest, RelayResponse } from "../types.js";
 
 export function createLoggerMiddleware(
   logger: RelayLogger,
@@ -16,12 +16,15 @@ export function createLoggerMiddleware(
         model: req.model,
         sessionId: req.sessionId,
       };
-      if (includePrompts) log["body"] = req.body;
+      if (includePrompts) log.body = req.body;
       logger.info(log, "→ proxiq request");
       return req;
     },
 
-    async onResponse(res: RelayResponse, req: RelayRequest): Promise<RelayResponse> {
+    async onResponse(
+      res: RelayResponse,
+      req: RelayRequest
+    ): Promise<RelayResponse> {
       logger.info(
         {
           requestId: req.id,

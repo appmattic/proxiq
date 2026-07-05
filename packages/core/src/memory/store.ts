@@ -21,9 +21,23 @@ export function createMemoryStore(db: DB) {
   );
 
   return {
-    addTurn(sessionId: string, role: string, content: string, embedding: number[] | null): void {
-      const embBlob = embedding ? Buffer.from(new Float32Array(embedding).buffer) : null;
-      insert.run(randomUUID(), sessionId, role, content, embBlob, Math.floor(Date.now() / 1000));
+    addTurn(
+      sessionId: string,
+      role: string,
+      content: string,
+      embedding: number[] | null
+    ): void {
+      const embBlob = embedding
+        ? Buffer.from(new Float32Array(embedding).buffer)
+        : null;
+      insert.run(
+        randomUUID(),
+        sessionId,
+        role,
+        content,
+        embBlob,
+        Math.floor(Date.now() / 1000)
+      );
     },
 
     recall(sessionId: string, topK: number): Turn[] {

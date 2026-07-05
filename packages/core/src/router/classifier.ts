@@ -7,7 +7,10 @@ const SYSTEM_PROMPT = `You are a prompt complexity classifier. Given a user mess
 
 Respond with ONLY the word: simple, standard, or complex`;
 
-export async function classifyWithHaiku(prompt: string, apiKey: string): Promise<Tier> {
+export async function classifyWithHaiku(
+  prompt: string,
+  apiKey: string
+): Promise<Tier> {
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -26,7 +29,9 @@ export async function classifyWithHaiku(prompt: string, apiKey: string): Promise
 
     if (!response.ok) return "standard";
 
-    const data = await response.json() as { content: Array<{ text: string }> };
+    const data = (await response.json()) as {
+      content: Array<{ text: string }>;
+    };
     const answer = data.content[0]?.text?.trim().toLowerCase() ?? "";
 
     if (answer === "simple") return "simple";

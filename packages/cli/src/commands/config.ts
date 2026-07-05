@@ -1,6 +1,6 @@
-import { writeFileSync, readFileSync, existsSync } from "node:fs";
-import type { Command } from "commander";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { loadConfig, validateConfig } from "@proxiq/core";
+import type { Command } from "commander";
 
 const DEFAULT_CONFIG_PATH = ".proxiq.json";
 
@@ -27,7 +27,9 @@ const EXAMPLE_CONFIG = {
 };
 
 export function registerConfig(program: Command): void {
-  const configCmd = program.command("config").description("Manage Proxiq configuration");
+  const configCmd = program
+    .command("config")
+    .description("Manage Proxiq configuration");
 
   configCmd
     .command("init")
@@ -35,10 +37,16 @@ export function registerConfig(program: Command): void {
     .option("-o, --out <path>", "Output path", DEFAULT_CONFIG_PATH)
     .action((opts: { out: string }) => {
       if (existsSync(opts.out)) {
-        console.error(`${opts.out} already exists. Delete it first or specify a different path.`);
+        console.error(
+          `${opts.out} already exists. Delete it first or specify a different path.`
+        );
         process.exit(1);
       }
-      writeFileSync(opts.out, JSON.stringify(EXAMPLE_CONFIG, null, 2) + "\n", "utf-8");
+      writeFileSync(
+        opts.out,
+        `${JSON.stringify(EXAMPLE_CONFIG, null, 2)}\n`,
+        "utf-8"
+      );
       console.log(`Created ${opts.out}`);
     });
 
@@ -66,7 +74,8 @@ export function registerConfig(program: Command): void {
         const config = await loadConfig(opts.config);
         // Redact secrets before printing
         const safe = JSON.parse(JSON.stringify(config));
-        if (safe.routing?.classifierApiKey) safe.routing.classifierApiKey = "[redacted]";
+        if (safe.routing?.classifierApiKey)
+          safe.routing.classifierApiKey = "[redacted]";
         if (safe.cloud?.apiKey) safe.cloud.apiKey = "[redacted]";
         console.log(JSON.stringify(safe, null, 2));
       } catch (err) {
