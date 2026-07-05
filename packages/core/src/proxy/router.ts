@@ -16,7 +16,7 @@ export function buildForwardHeaders(
   provider: string,
   configKey?: string
 ): Record<string, string> {
-  const result: Record<string, string> = {};
+  let result: Record<string, string> = {};
 
   for (const [key, value] of Object.entries(incoming)) {
     const lower = key.toLowerCase();
@@ -45,9 +45,12 @@ export function buildForwardHeaders(
       !result["x-api-key"]
     ) {
       const match = result.authorization.match(/^Bearer\s+(.+)$/i);
-      if (match) {
-        result["x-api-key"] = match[1]!;
-        delete result.authorization;
+      const token = match?.[1];
+      if (token) {
+        result["x-api-key"] = token;
+        const { authorization: _authorization, ...withoutAuthorization } =
+          result;
+        result = withoutAuthorization;
       }
     }
   }
