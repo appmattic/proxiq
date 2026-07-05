@@ -1,0 +1,12 @@
+{
+  "name": "proxiq",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": { "proxiq": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc --noEmit" },
+  "dependencies": {
+    "@proxiq/core": "workspace:*",
+    "commander": "^13.1.0"
+  },
+  "devDependencies": { "@types/node": "^22.10.2" }
+}

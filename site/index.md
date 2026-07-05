@@ -1,0 +1,143 @@
+---
+layout: home
+title: Home
+nav_order: 1
+---
+
+# The AI gateway your security team will actually approve.
+{: .fs-9 }
+
+Proxiq sits between your teams and every LLM API — giving security teams DLP, policy enforcement, SSO, and a full audit trail, while developers keep using Claude, GPT, or any other model with **zero code changes**.
+{: .fs-6 .fw-300 }
+
+[Get started in 5 minutes]({% link docs/getting-started.md %}){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
+[View on GitHub](https://github.com/appmattic/proxiq){: .btn .fs-5 .mb-4 .mb-md-0 }
+
+---
+
+```
+Your Teams → Proxiq (:3099) → Anthropic / OpenAI / Azure / Groq / Ollama / ...
+```
+
+Self-hosted. Open source. No data leaves your infrastructure.
+
+---
+
+## Why teams deploy Proxiq
+
+**For your security team:**
+
+- Block or redact PII before it reaches any LLM — credit cards, SSNs, passports, API keys
+- Detect and block prompt injection attacks with a configurable threshold
+- Lock system prompts so no client can override your compliance instructions
+- Per-user, per-team security policies — Banking, Healthcare, Marketing, or custom
+- Full audit trail of every request, DLP event, and policy action
+- SSO via Microsoft Azure AD, Google Workspace, GitHub, Okta, or any OIDC/SAML IdP
+
+**For your developers:**
+
+- Point existing code at `localhost:3099` instead of `api.anthropic.com` — nothing else changes
+- Drop-in SDK wrapper: `relay(new Anthropic())` — one line
+- 65–85% cost reduction via semantic caching, exact caching, and prompt cache injection
+- Intelligent routing: cheapest capable model tier per request automatically
+
+---
+
+## Install
+
+**macOS / Linux** — clone and run the setup script (checks all prerequisites, installs Bun if needed, builds and configures):
+
+```bash
+git clone https://github.com/appmattic/proxiq
+cd proxiq
+bash setup.sh
+./proxiq start
+```
+
+**Docker** (all platforms including Windows):
+
+```bash
+docker run -d -p 127.0.0.1:3099:3099 -v proxiq-data:/data ghcr.io/appmattic/proxiq
+```
+
+Then open the dashboard:
+
+```
+http://127.0.0.1:3099/proxiq/dashboard
+```
+
+---
+
+## Your first security policy
+
+Create a named policy and assign it to any user or token. No app changes required.
+
+```json
+{
+  "policies": {
+    "banking-strict": {
+      "dlp": {
+        "enabled": true,
+        "detect": ["credit_card", "ssn", "iban", "api_key", "email"],
+        "action": "block"
+      },
+      "promptGuard": { "enabled": true, "blockThreshold": 0.5 },
+      "systemPromptLock": {
+        "prepend": "You are a compliant banking assistant."
+      },
+      "allowedProviders": ["anthropic"],
+      "logging": { "storeContent": true, "retentionDays": 365 }
+    }
+  }
+}
+```
+
+Or build policies visually in the dashboard — no config file editing needed.
+
+---
+
+## Cost optimization
+
+| Feature | How | Typical saving |
+|---|---|---|
+| **Exact cache** | SHA-256 match → SQLite hit | 100% on repeated queries |
+| **Semantic cache** | Local MiniLM embeddings, ≥0.94 cosine similarity | 40–70% on similar queries |
+| **Prompt cache injection** | Auto-injects Anthropic `cache_control` breakpoints | ~78% on repeated prefixes |
+| **Intent routing** | Routes each prompt to cheapest capable model tier | 30–60% on mixed workloads |
+
+---
+
+## SDK integration (one line)
+
+```typescript
+import { relay } from '@proxiq/sdk';
+import Anthropic from '@anthropic-ai/sdk';
+
+// All calls route through Proxiq — policies, DLP, caching applied automatically
+const client = relay(new Anthropic());
+```
+
+---
+
+## Browse the docs
+
+- [Getting Started]({% link docs/getting-started.md %}) — install, first request, first security policy
+- [Enterprise & Security]({% link docs/enterprise.md %}) — DLP, prompt guard, SSO, compliance
+- [Configuration]({% link docs/configuration.md %}) — full `.proxiq.json` reference
+- [Supported Providers]({% link docs/providers.md %}) — Anthropic, OpenAI, Azure, Groq, Ollama, and more
+- [SDK Integration]({% link docs/sdk.md %}) — drop-in wrapper for Anthropic/OpenAI clients
+- [CLI Reference]({% link docs/cli.md %}) — all commands
+- [Claude Connector]({% link docs/claude-connector.md %}) — MCP setup for Claude Code and Claude Desktop
+- [Deployment]({% link docs/deployment.md %}) — Docker, systemd, AWS, Azure
+- [Architecture]({% link docs/architecture.md %}) — security pipeline and storage design
+
+---
+
+## Enterprise & commercial licensing
+
+Proxiq is open-source under AGPL-3.0. Self-hosting for internal use is always free.
+
+APPMATTIC offers commercial licensing, managed deployment, SLA support, and professional onboarding for regulated industries.
+
+[Enterprise details]({% link docs/enterprise.md %}){: .btn .btn-primary .mr-2 }
+[Email APPMATTIC](mailto:build@appmattic.com){: .btn }

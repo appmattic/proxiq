@@ -1,0 +1,17 @@
+services:
+  proxiq:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    ports:
+      - "127.0.0.1:3099:3099"
+    volumes:
+      - proxiq_data:/data
+      # Uncomment to mount a local config file:
+      # - ./.proxiq.json:/app/.proxiq.json:ro
+    environment:
+      - PROXIQ_LOG_LEVEL=info
+    restart: unless-stopped
+
+volumes:
+  proxiq_data:
