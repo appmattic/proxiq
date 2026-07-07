@@ -13,7 +13,11 @@ The self-hosted LLM gateway security teams demand and developers never notice.
 [Get started in 5 minutes](docs/getting-started/){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [View on GitHub](https://github.com/appmattic/proxiq){: .btn .fs-5 .mb-4 .mb-md-0 }
 
-<a href="https://www.producthunt.com/products/proxiq?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-proxiq" target="_blank" rel="noopener noreferrer"><img alt="Proxiq - Self-hosted LLM gateway with DLP, SSO &amp; full audit trail | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1190045&theme=dark&t=1783414233518"></a>
+<div style="margin-top: 1.5rem;">
+  <a href="https://www.producthunt.com/products/proxiq?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-proxiq" target="_blank" rel="noopener noreferrer">
+    <img alt="Proxiq - Self-hosted LLM gateway with DLP, SSO &amp; full audit trail | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1190045&theme=dark&t=1783414233518">
+  </a>
+</div>
 
 ---
 
